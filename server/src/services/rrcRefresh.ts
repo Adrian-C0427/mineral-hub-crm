@@ -167,7 +167,6 @@ const WELL_COLUMNS: { col: string; key: keyof WellsDataset["wells"][number] | nu
   { col: "field_no", key: "fieldNo", mode: "keep-if-null" },
   { col: "field_name", key: "fieldName", mode: "keep-if-null" },
   { col: "oil_gas", key: "oilGas", mode: "keep-if-null" },
-  { col: "formations", key: "formations", cast: "text[]", mode: "keep-if-null" },
   { col: "spud_date", key: "spudDate", cast: "date", mode: "keep-if-null" },
   // Status-bound dates: a well that isn't plugged / shut in has none.
   { col: "plug_date", key: "plugDate", cast: "date", mode: "replace" },

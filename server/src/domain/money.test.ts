@@ -72,7 +72,7 @@ describe("deal profit — one rule everywhere", () => {
 
 describe("report aggregates carry no float tails", () => {
   const base: AnalyticsDeal = {
-    id: "d", createdAt: new Date("2026-01-05T00:00:00Z"), stage: "CLOSED", states: [], counties: [], basins: [], formations: [], assetTypes: [],
+    id: "d", createdAt: new Date("2026-01-05T00:00:00Z"), stage: "CLOSED", states: [], counties: [], assetTypes: [],
     operator: null, askPrice: null, ourPrice: null, acceptedAmount: null, estimatedClosingCosts: null, relationshipOwnerId: null,
     selectedBuyerId: null, createdByUserId: null, closedByUserId: null, dateUnderContract: null, closedAt: new Date("2026-02-10T00:00:00Z"), deadAt: null,
   };

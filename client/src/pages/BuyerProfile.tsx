@@ -15,7 +15,6 @@ import { StateSelect } from "../components/StateSelect";
 import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelationships";
 import { BuyerAliasManager } from "../components/BuyerAliasManager";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { basinOptions, formationOptions, useGeoCatalog } from "../lib/geoContext";
 import { money, pct, acres, fmtDate } from "../lib/format";
 import { sumMoney } from "../lib/money";
 import { formatPhone } from "../lib/phone";
@@ -51,9 +50,9 @@ interface BuyerProfileData {
   dealHistory: { dealId: string; dealName: string; stage: string; status: string; amount: number | null; profit: number | null; isSelectedBuyer: boolean; date: string }[];
 }
 
-const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "basins", "formations", "assetTypes"];
+const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "assetTypes"];
 const BUYBOX_LABELS: Partial<Record<keyof BuyBox, string>> = {
-  states: "States", counties: "Counties", basins: "Basins", formations: "Formations", assetTypes: "Asset types",
+  states: "States", counties: "Counties", assetTypes: "Asset types",
 };
 
 /** Human range: both bounds → "a – b", one bound → "500+ " / "up to 500", none → "Any". */
@@ -151,8 +150,6 @@ export function BuyerProfile() {
 
   const setD = (patch: Partial<BuyerProfileData>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const setBox = (k: keyof BuyBox, v: unknown) => setDraft((d) => (d ? { ...d, buyBox: { ...d.buyBox, [k]: v } } : d));
-  // Full basin / formation vocabulary (the geology catalog + the legacy list): a buy box must be able to name any basin a deal can carry.
-  const geoCatalog = useGeoCatalog();
 
   /** Per-panel header: title + its own Edit (or Save/Cancel while editing). */
   function SectionHead({ title, section }: { title: string; section: Section }) {
@@ -332,12 +329,6 @@ export function BuyerProfile() {
                   labels={{ state: "States", county: "Counties" }}
                 />
               </div>
-              <Fld l="Basins">
-                <SearchableMultiSelect options={basinOptions(geoCatalog, null)} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />
-              </Fld>
-              <Fld l="Formations">
-                <SearchableMultiSelect options={formationOptions(geoCatalog, null)} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
-              </Fld>
               <Fld l="Asset types">
                 <SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
               </Fld>

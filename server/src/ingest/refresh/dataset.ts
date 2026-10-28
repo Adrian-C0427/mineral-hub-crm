@@ -73,7 +73,6 @@ export interface WellRow {
   lastProd: string | null;
   cumOil: number | null;
   cumGas: number | null;
-  formations: string[] | null;
   injectionType: string | null;
   /** Lease / pooled-unit acres from the newest W-1 permit that reports them. */
   unitAcres: number | null;

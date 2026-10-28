@@ -20,7 +20,6 @@ import { TaskFormModal, TASK_PRIORITY_META } from "../components/TaskForm";
 import { newTaskValues, type TaskFormValues } from "../lib/tasks";
 import { isAbstractId } from "../lib/opportunityForm";
 import { surveyLabel } from "../lib/abstracts";
-import { GeoTagFields } from "../components/GeoTagFields";
 import { acres, fmtDate, fmtDateLocal, fmtDateTime, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import type { ContactActivityRow } from "./ContactDetail";
@@ -354,7 +353,6 @@ function DetailsCard({ opp, canEdit, onSaved }: { opp: Opp; canEdit: boolean; on
   const seed = useMemo(() => ({
     state: opp.state ?? "", county: opp.county ?? "", abstract: opp.abstract ?? "", survey: opp.survey ?? "",
     estAcres: numStr(opp.estAcres), estNma: numStr(opp.estNma), estNra: numStr(opp.estNra),
-    basins: [...(opp.basins ?? [])], formations: [...(opp.formations ?? [])],
   }), [opp]);
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(seed);
@@ -381,7 +379,6 @@ function DetailsCard({ opp, canEdit, onSaved }: { opp: Opp; canEdit: boolean; on
       const o = await api.patch<Opp>(`/opportunities/${opp.id}`, {
         state: txt(f.state), county: txt(f.county), abstract: txt(f.abstract), survey: txt(f.survey),
         estAcres: numOrNull(f.estAcres), estNma: numOrNull(f.estNma), estNra: numOrNull(f.estNra),
-        basins: f.basins, formations: f.formations,
       });
       setEdit(false); onSaved(o); showToast("Opportunity saved.");
     } catch (e) { setError(e instanceof ApiError ? e.message : "Could not save"); }
@@ -396,7 +393,6 @@ function DetailsCard({ opp, canEdit, onSaved }: { opp: Opp; canEdit: boolean; on
             { title: "Property", rows: [
               { k: "State", v: opp.state }, { k: "County", v: opp.county },
               { k: "Abstract", v: opp.abstract ? <OppAbstract abstract={opp.abstract} /> : null }, { k: "Survey", v: opp.survey, title: opp.survey },
-              { k: "Basin", v: opp.basins?.length ? opp.basins.join(", ") : null }, { k: "Formation", v: opp.formations?.length ? opp.formations.join(", ") : null },
             ] },
             { title: "Acreage (estimates)", rows: [
               { k: "Est. gross acres", v: opp.estAcres != null ? acres(opp.estAcres) : null },
@@ -414,8 +410,6 @@ function DetailsCard({ opp, canEdit, onSaved }: { opp: Opp; canEdit: boolean; on
               abstractIds={f.abstract ? [f.abstract] : []} onAbstractsChange={pickAbstract}
             />
             <Fld l="Survey"><input value={f.survey} onChange={(e) => setF((p) => ({ ...p, survey: e.target.value }))} placeholder="Filled in from the abstract" /></Fld>
-            <GeoTagFields autoFill basins={f.basins} onBasinsChange={(v) => setF((p) => ({ ...p, basins: v }))} formations={f.formations} onFormationsChange={(v) => setF((p) => ({ ...p, formations: v }))}
-              abstractIds={f.abstract && isAbstractId(f.abstract) ? [f.abstract] : []} counties={f.county ? [f.county] : []} states={f.state ? [f.state] : []} />
             <Fld l="Est. gross acres"><input type="number" min={0} step="any" value={f.estAcres} onChange={(e) => setF((p) => ({ ...p, estAcres: e.target.value }))} aria-label="Estimated gross acres" /></Fld>
             <Fld l="Est. NMA"><input type="number" min={0} step="any" value={f.estNma} onChange={(e) => setF((p) => ({ ...p, estNma: e.target.value }))} aria-label="Estimated NMA" /></Fld>
             <Fld l="Est. NRA"><input type="number" min={0} step="any" value={f.estNra} onChange={(e) => setF((p) => ({ ...p, estNra: e.target.value }))} aria-label="Estimated NRA" /></Fld>

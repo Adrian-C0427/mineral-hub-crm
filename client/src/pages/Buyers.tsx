@@ -42,9 +42,9 @@ export function RelTag({ status }: { status: Rel }) {
 }
 
 /** The list API sends the focus area pre-joined ("Leon, Freestone…", or
- *  states / basins as a fallback) plus the full county list. Display only:
- *  two county chips and an exact "+N" naming the rest on hover. Without the
- *  county list (state / basin fallback) the joined text is split as sent. */
+ *  states as a fallback) plus the full county list. Display only: two
+ *  county chips and an exact "+N" naming the rest on hover. Without the
+ *  county list (state fallback) the joined text is split as sent. */
 function FocusChips({ value, counties }: { value: string; counties?: string[] }) {
   if (counties && counties.length > 0) {
     const rest = counties.slice(2);

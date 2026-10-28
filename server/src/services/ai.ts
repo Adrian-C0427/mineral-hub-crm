@@ -70,7 +70,7 @@ async function complete(client: Anthropic, system: string, user: string, maxToke
 export interface DealContext {
   name: string; stage: string; recordType: string;
   state: string | null; states: string[]; counties: string[];
-  operator: string | null; assetTypes: string[]; basins: string[]; formations: string[];
+  operator: string | null; assetTypes: string[];
   acreageNma: number | null; nra: number | null;
   /** Stored lease royalty rate ("3/16", "18.75%", …); optional for older callers. */
   royaltyRate?: string | null;
@@ -103,8 +103,6 @@ export function dealFacts(d: DealContext): string {
     line("Counties", d.counties),
     line("Operator", d.operator),
     line("Asset types", d.assetTypes),
-    line("Basins", d.basins),
-    line("Formations", d.formations),
     line("Net mineral acres (NMA)", d.acreageNma != null ? num(d.acreageNma) : null),
     line("Lease royalty rate", d.royaltyRate ? royaltyLabel(d.royaltyRate) : null),
     line("Net royalty acres (NRA, normalized to a 1/8 royalty)", d.nra != null ? num(d.nra) : null),

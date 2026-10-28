@@ -77,7 +77,7 @@ function recordPortalEvent(dealId: string, kind: "VIEW" | "DOWNLOAD", visitorId:
 function publicDeal(d: {
   name: string; portalSlug: string | null; portalSummary: string | null; portalFeatured: boolean;
   counties: string[]; states: string[]; state: string | null; abstractIds: string[];
-  basins: string[]; formations: string[]; assetTypes: string[]; surveys: string[];
+  assetTypes: string[]; surveys: string[];
   nra: number | null; acreageNma: number | null; operator: string | null; rrc?: string | null;
   wells: string[]; producingStatus: string | null; updatedAt: Date;
   portalAskPrice?: number | null; askPrice?: number | null;
@@ -91,8 +91,6 @@ function publicDeal(d: {
     counties: d.counties,
     states: d.states.length ? d.states : d.state ? [d.state] : [],
     abstractIds: d.abstractIds,
-    basins: d.basins,
-    formations: d.formations,
     assetTypes: d.assetTypes,
     surveys: d.surveys,
     nra: d.nra,
@@ -474,8 +472,6 @@ const leadSchema = z.object({
   buyBox: z.object({
     states: z.array(z.string().trim().max(40)).max(50).default([]),
     counties: z.array(z.string().trim().max(60)).max(200).default([]),
-    basins: z.array(z.string().trim().max(80)).max(50).default([]),
-    formations: z.array(z.string().trim().max(80)).max(50).default([]),
     assetTypes: z.array(z.string().trim().max(60)).max(20).default([]),
     minAcreage: z.number().nonnegative().optional().nullable(),
     maxAcreage: z.number().nonnegative().optional().nullable(),
@@ -557,7 +553,7 @@ portalRouter.post(
 
     // Internal notification → assigned owners, else org admins see it (userId null).
     const owners = await prisma.buyerOwner.findMany({ where: { buyerId }, select: { userId: true } });
-    const interest = [...lead.buyBox.states, ...lead.buyBox.counties, ...lead.buyBox.basins].slice(0, 6).join(", ") || "—";
+    const interest = [...lead.buyBox.states, ...lead.buyBox.counties].slice(0, 6).join(", ") || "—";
     const title = `Portal lead: ${lead.contactName} (${lead.companyName})`;
     const suffix = outcome === "flagged"
       ? " · POSSIBLE DUPLICATE — review"

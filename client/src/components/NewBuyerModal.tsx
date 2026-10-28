@@ -7,7 +7,6 @@ import { PhoneInput } from "./PhoneInput";
 import { GeoFields } from "./GeoFields";
 import { StateSelect } from "./StateSelect";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { basinOptions, formationOptions, useGeoCatalog } from "../lib/geoContext";
 import { MoneyInput } from "./MoneyInput";
 import { FormSection } from "./kit";
 
@@ -26,9 +25,6 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
   const [relationshipStatus, setRelationshipStatus] = useState<"HOT" | "WARM" | "COLD">("WARM");
   const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
-  const [basins, setBasins] = useState<string[]>([]);
-  const geoCatalog = useGeoCatalog();
-  const [formations, setFormations] = useState<string[]>([]);
   const [assetTypes, setAssetTypes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,7 +61,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         notes: f.notes || null,
         buyBox: {
           states,
-          counties, basins, formations, assetTypes,
+          counties, assetTypes,
           minAcreage: numOrNull(f.minAcreage),
           maxAcreage: numOrNull(f.maxAcreage),
           minPrice: numOrNull(f.minPrice),
@@ -132,8 +128,6 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
           counties={counties} onCountiesChange={setCounties}
           labels={{ state: "States", county: "Counties" }}
         />
-        <div className="field"><label>Basins</label><SearchableMultiSelect options={basinOptions(geoCatalog, null)} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
-        <div className="field"><label>Formations</label><SearchableMultiSelect options={formationOptions(geoCatalog, null)} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
         <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Min acreage</label><input type="number" value={f.minAcreage} onChange={set("minAcreage")} placeholder="0" /></div>
         <div className="field"><label>Max acreage</label><input type="number" value={f.maxAcreage} onChange={set("maxAcreage")} placeholder="No max" /></div>

@@ -230,14 +230,12 @@ export async function buildRefresh(o: BuildOptions): Promise<BuildResult> {
     for (const [api, b] of best) { const k = uicKind(b.code); if (k) uic.set(api, k); }
   }
 
-  // 5. Wellbore master (dbf900, EBCDIC): formations, and a plug date where the Wellbore Query has none.
+  // 5. Wellbore master (dbf900, EBCDIC): a plug date where the Wellbore Query has none.
   log("wellbore master…");
-  const formations = new Map<string, string[]>();
   const dbfPlug = new Map<string, string>();
   {
     const keep = (f: WellboreFacts | null) => {
       if (!f || !apis.has(f.api8)) return;
-      if (f.formations.length) formations.set(f.api8, f.formations);
       if (f.plugDate) dbfPlug.set(f.api8, f.plugDate.replace(/-/g, ""));
     };
     let current: WellboreFacts | null = null;
@@ -321,7 +319,7 @@ export async function buildRefresh(o: BuildOptions): Promise<BuildResult> {
 
   // 7. Assemble wells, bores, history.
   log("assembling…");
-  const ctx: WellContext = { ewa, permits, acreage, assigned, uic, formations, dbfPlug, production: leaseProd, prodNewestYm: String(newestYm), asOf: o.asOf };
+  const ctx: WellContext = { ewa, permits, acreage, assigned, uic, dbfPlug, production: leaseProd, prodNewestYm: String(newestYm), asOf: o.asOf };
   const bottomsBySurface = new Map<number, BottomRecord[]>();
   for (const b of bottoms.values()) {
     const sid = Number(b.rec.SURFACE_ID);

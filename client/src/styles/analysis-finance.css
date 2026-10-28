@@ -89,8 +89,6 @@
 .va-rec-sec-t { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .va-rec-text { font-size: 13px; line-height: 1.55; color: var(--ink-1); }
 .va-rec-note { font-size: 12px; color: var(--ink-3); }
-.va-formations { display: flex; flex-wrap: wrap; gap: 6px; }
-.va-formation { height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 12px; font-weight: 600; color: var(--ink-soft); }
 .va-rrc-links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; font-weight: 600; }
 .va-rrc-links a { color: var(--accent-ink); text-decoration: none; }
 .va-rrc-links a:hover { color: var(--accent-ink-hover); text-decoration: underline; }

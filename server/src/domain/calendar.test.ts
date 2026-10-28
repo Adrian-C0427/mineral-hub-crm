@@ -103,7 +103,7 @@ describe("eventEntry", () => {
 
   it("links to the deal or the buyer and drops times when all day", () => {
     expect(eventEntry({ ...row, deal: { id: "d1", name: "Smith 40" } }).link).toEqual({ kind: "deal", id: "d1", label: "Smith 40" });
-    expect(eventEntry({ ...row, buyer: { id: "b1", name: "Basin Peak" } }).link).toEqual({ kind: "buyer", id: "b1", label: "Basin Peak" });
+    expect(eventEntry({ ...row, buyer: { id: "b1", name: "Summit Peak" } }).link).toEqual({ kind: "buyer", id: "b1", label: "Summit Peak" });
     const allDay = eventEntry({ ...row, allDay: true, completedAt: new Date() });
     expect([allDay.start, allDay.end, allDay.done]).toEqual([null, null, true]);
   });

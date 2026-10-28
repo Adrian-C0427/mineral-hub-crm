@@ -42,7 +42,7 @@ interface WellProps {
   fid: number; api8?: string; api?: string; wellNo?: string; wellId?: string;
   symbol?: string; type?: string; status?: string; category?: string; county?: string;
   leaseNo?: string; oilGas?: string; district?: string; operator?: string; operatorNo?: string;
-  leaseName?: string; field?: string; formations?: string[];
+  leaseName?: string; field?: string;
   cumOil?: number | null; cumGas?: number | null; lastProd?: string | null;
 }
 interface Feature { properties: WellProps & Record<string, unknown>; geometry: { type: string; coordinates: unknown } }
@@ -80,7 +80,6 @@ async function ddl(): Promise<void> {
       field_no     text,
       field_name   text,
       oil_gas      text,
-      formations   text[],
       spud_date    date,                      -- dbf900 root record date
       plug_date    date,
       cum_oil      double precision,
@@ -126,7 +125,7 @@ async function importCounty(key: string, db900: Record<string, Dbf900>): Promise
   await prisma.$executeRawUnsafe(`DELETE FROM rrc.wells WHERE county = $1`, county);
   await prisma.$executeRawUnsafe(`DELETE FROM rrc.wellbores WHERE county = $1`, county);
 
-  const W = 24; // columns per wells row
+  const W = 23; // columns per wells row
   const BATCH = 200;
   const rows: unknown[][] = [];
   const seen = new Set<number>();
@@ -141,7 +140,6 @@ async function importCounty(key: string, db900: Record<string, Dbf900>): Promise
       p.district || null, p.leaseNo || null, p.leaseName || null,
       p.operator || null, p.operatorNo || null,
       d.w10FieldNo || null, (p.field as string) || null, p.oilGas || null,
-      p.formations?.length ? p.formations : null,
       rrcDate(d.rootDate), rrcDate(d.plugDate),
       p.cumOil ?? null, p.cumGas ?? null, p.lastProd ?? null,
     ]);
@@ -151,15 +149,15 @@ async function importCounty(key: string, db900: Record<string, Dbf900>): Promise
     const chunk = rows.slice(i, i + BATCH);
     const values = chunk.map((r, j) => {
       const base = j * (W + 1);
-      // k 18 = formations text[], k 19/20 = spud/plug dates — cast explicitly.
+      // k 18/19 = spud/plug dates — cast explicitly.
       const params = Array.from({ length: W }, (_, k) =>
-        `$${base + k + 1}${k === 18 ? "::text[]" : k === 19 || k === 20 ? "::date" : ""}`);
+        `$${base + k + 1}${k === 18 || k === 19 ? "::date" : ""}`);
       return `(${params.join(",")}, ST_GeomFromGeoJSON($${base + W + 1}))`;
     }).join(",");
     const params = chunk.flatMap((r) => [...r, geomByFid.get(r[0] as number)]);
     await prisma.$executeRawUnsafe(
       `INSERT INTO rrc.wells (fid, api8, api10, well_no, well_id, symbol, type, status, category, county,
-         district, lease_no, lease_name, operator, operator_no, field_no, field_name, oil_gas, formations,
+         district, lease_no, lease_name, operator, operator_no, field_no, field_name, oil_gas,
          spud_date, plug_date, cum_oil, cum_gas, last_prod, geom)
        VALUES ${values} ON CONFLICT (fid) DO NOTHING`,
       ...params,

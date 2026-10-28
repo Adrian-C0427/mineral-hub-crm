@@ -435,9 +435,9 @@ export function uicKind(code: string): UicFacts | null {
     case "2": return { kind: "Disposal", detail: "Disposal into a productive zone (H-1)" };
     case "3": return { kind: "Injection", detail: "Secondary/tertiary recovery" };
     case "4": return { kind: "Injection", detail: "Miscellaneous injection" };
-    case "5": return { kind: "Injection", detail: "Liquid storage (salt formation)" };
+    case "5": return { kind: "Injection", detail: "Liquid storage (salt cavern)" };
     case "6": return { kind: "Injection", detail: "Gas storage (reservoir)" };
-    case "7": return { kind: "Injection", detail: "Gas storage (salt formation)" };
+    case "7": return { kind: "Injection", detail: "Gas storage (salt cavern)" };
     default: return null;
   }
 }

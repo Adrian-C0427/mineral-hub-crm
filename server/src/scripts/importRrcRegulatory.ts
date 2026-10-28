@@ -70,7 +70,7 @@ async function ddl(): Promise<void> {
       district        text,
       operator_no     text,
       field_no        text,
-      field_name      text,          -- reservoir/formation proxy
+      field_name      text,          -- RRC field (reservoir) name
       well_name       text,
       well_no         text,
       survey          text,

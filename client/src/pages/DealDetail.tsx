@@ -20,7 +20,6 @@ import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { GeoTagFields } from "../components/GeoTagFields";
 import { money, num, acres, pct, daysBetween, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
@@ -591,7 +590,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
     // An unreadable custom royalty rate already shows its inline message.
     if (royaltyRateError(econ.royaltyRate)) return;
     await api.patch(`/deals/${deal.id}`, {
-      states: f.states, counties: f.counties, basins: f.basins, formations: f.formations,
+      states: f.states, counties: f.counties,
       assetTypes: f.assetTypes, abstractIds: f.abstractIds, operator: f.operator || null, rrc: f.rrc,
       royaltyRate: econ.royaltyRate || null,
       acreageNma: t.nma, nra: t.nra,
@@ -617,8 +616,6 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
         { k: "County", v: list(deal.counties) },
         // Label the abstract with its county only when unambiguous.
         { k: deal.abstractIds.length > 1 ? "Abstracts" : "Abstract", v: deal.abstractIds.length ? abstractLabel : null },
-        { k: "Basin", v: list(deal.basins) },
-        { k: "Formation", v: list(deal.formations) },
         { k: "Operator", v: deal.operator },
         { k: "RRC number", v: deal.rrc },
       ],
@@ -685,8 +682,6 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
             counties={f.counties} onCountiesChange={setArr("counties")}
             abstractIds={f.abstractIds} onAbstractsChange={setArr("abstractIds")}
           />
-          {/* Suggested from the abstracts / counties; blank fields are filled in, picks are kept. */}
-          <GeoTagFields autoFill basins={f.basins} onBasinsChange={setArr("basins")} formations={f.formations} onFormationsChange={setArr("formations")} abstractIds={f.abstractIds} counties={f.counties} states={f.states ?? []} />
           <Fld l="Asset type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           {/* Operator names run long — give the picker two columns. */}
           <div className="field" style={{ gridColumn: "span 2" }}>

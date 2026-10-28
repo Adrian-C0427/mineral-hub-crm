@@ -4,8 +4,8 @@ import type { DealSummary } from "../types";
  * One searchable haystack per deal/asset row, shared by the Deals pages and
  * Mineral Assets so search behaves identically everywhere. Covers every
  * indexed identifier a user might reach for: name, sellers, abstracts,
- * surveys, geography, buyer, owner, operator, wells, RRC, basins/formations,
- * asset types, ownership.
+ * surveys, geography, buyer, owner, operator, wells, RRC, asset types,
+ * ownership.
  */
 export function dealSearchHaystack(d: DealSummary): string {
   return [
@@ -26,8 +26,6 @@ export function dealSearchHaystack(d: DealSummary): string {
     d.operator,
     ...d.wells,
     d.rrc,
-    ...d.basins,
-    ...d.formations,
     ...d.assetTypes,
     d.ownershipType,
     d.producingStatus,

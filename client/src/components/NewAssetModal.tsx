@@ -6,7 +6,6 @@ import { GeoFields } from "./GeoFields";
 import { SurveyMultiPicker } from "./AbstractPicker";
 import { Select } from "./Select";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { GeoTagFields } from "./GeoTagFields";
 import { OWNERSHIP_STATUSES, PRODUCING_STATUSES, LEASE_STATUS_OPTIONS } from "../lib/assetOptions";
 import type { DealSummary } from "../types";
 import { MoneyInput } from "./MoneyInput";
@@ -72,8 +71,6 @@ export function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onC
   const [counties, setCounties] = useState<string[]>([]);
   const [abstractIds, setAbstractIds] = useState<string[]>([]);
   const [surveys, setSurveys] = useState<string[]>([]);
-  const [basins, setBasins] = useState<string[]>([]);
-  const [formations, setFormations] = useState<string[]>([]);
   const [assetTypes, setAssetTypes] = useState<string[]>([]);
   const [wells, setWells] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +123,7 @@ export function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onC
         recordType: "OWNED_ASSET",
         assetMode: "HOLD",
         states, state: states[0] ?? null,
-        counties, basins, formations, assetTypes, abstractIds, surveys, wells,
+        counties, assetTypes, abstractIds, surveys, wells,
         operator: f.operator || null,
         rrc: f.rrc || null,
         acreageNma: nma,
@@ -211,7 +208,6 @@ export function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onC
                   labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
                 />
                 <div className="field"><label>Survey {req}</label><SurveyMultiPicker value={surveys} onChange={setSurveys} abstractIds={abstractIds} /></div>
-                <GeoTagFields autoFill basins={basins} onBasinsChange={setBasins} formations={formations} onFormationsChange={setFormations} abstractIds={abstractIds} counties={counties} states={states} />
                 <div className="field"><label title="Operators active in the selected state and county">Operator</label>
                   <OperatorSelect states={states} counties={counties} value={f.operator} onChange={(v) => setF((p) => ({ ...p, operator: v }))} />
                 </div>

@@ -83,7 +83,6 @@ export interface WellContext {
   permits: Map<string, PermitFiling[]>;
   acreage: Map<string, PermitAcreage[]>;
   uic: Map<string, UicFacts>;
-  formations: Map<string, string[]>;
   dbfPlug: Map<string, string>;
   production: Map<string, LeaseProduction>;
   prodNewestYm: string;
@@ -184,7 +183,6 @@ export function assembleWell(
   if (unit) src.unitAcres = "permits";
   if (assigned) src.assignedAcres = "proration-ledger";
   if (prod) src.lastProd = src.cum = "production";
-  if (api8 && ctx.formations.get(api8)?.length) src.formations = "wellbore-master";
   if (derived.status === "Injection" || derived.status === "Disposal") src.injectionType = derived.source === "uic" ? "uic" : "wellbore-query";
 
   const row: WellRow = {
@@ -214,7 +212,6 @@ export function assembleWell(
     lastProd: prod ? `${prod.lastYm.slice(0, 4)}-${prod.lastYm.slice(4, 6)}` : null,
     cumOil: prod ? prod.cumOil : null,
     cumGas: prod ? prod.cumGas : null,
-    formations: (api8 && ctx.formations.get(api8)) || null,
     injectionType: derived.status === "Injection" || derived.status === "Disposal" ? derived.detail : null,
     unitAcres: unit?.acres ?? null,
     unitAcresSource: unit ? `W-1 permit ${unit.permitNo}${unit.issued ? ` (${rrcIsoDate(unit.issued)})` : ""}` : null,

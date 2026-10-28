@@ -50,14 +50,12 @@ export interface OpportunityEditable {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
-  basins: string[];
-  formations: string[];
   source: string | null;
   notes: string | null;
 }
 export const OPPORTUNITY_EDITABLE_KEYS = [
   "ownerId", "contactId", "sellerName", "companyName", "phone", "email",
-  "state", "county", "abstract", "survey", "estAcres", "estNma", "estNra", "basins", "formations", "source", "notes",
+  "state", "county", "abstract", "survey", "estAcres", "estNma", "estNra", "source", "notes",
 ] as const satisfies readonly (keyof OpportunityEditable)[];
 
 /**
@@ -95,8 +93,6 @@ export interface ConvertibleOpportunity {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
-  basins?: string[];
-  formations?: string[];
   source: string | null;
   notes: string | null;
 }
@@ -160,8 +156,6 @@ export function convertedDealFields(o: ConvertibleOpportunity, actorUserId: stri
     abstractIds: abstract && isAbstractId(abstract) ? [normalizeAbstractId(abstract)] : [],
     acreageNma: o.estNma ?? o.estAcres ?? null,
     nra: o.estNra ?? null,
-    basins: o.basins ?? [],
-    formations: o.formations ?? [],
     notes: convertedDealNotes(o),
     relationshipOwnerId: o.ownerId ?? actorUserId,
   };
@@ -274,8 +268,6 @@ export interface OpportunityRow {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
-  basins?: string[];
-  formations?: string[];
   source: string | null;
   notes: string | null;
   lastActivityAt: Date | null;
@@ -327,8 +319,6 @@ export function serializeOpportunitySummary(o: OpportunityRow) {
     estAcres: o.estAcres,
     estNma: o.estNma,
     estNra: o.estNra,
-    basins: o.basins ?? [],
-    formations: o.formations ?? [],
     source: o.source,
     lastActivityAt: o.lastActivityAt,
     nextFollowUpDate: o.nextFollowUpDate,

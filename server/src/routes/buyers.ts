@@ -71,12 +71,11 @@ async function closeRatesByBuyer(organizationId: string): Promise<Map<string, { 
   return out;
 }
 
-function focusArea(box: { states: string[]; counties: string[]; basins: string[] } | null): string {
+function focusArea(box: { states: string[]; counties: string[] } | null): string {
   if (!box) return "—";
   const parts: string[] = [];
   if (box.counties.length) parts.push(box.counties.slice(0, 2).join(", ") + (box.counties.length > 2 ? "…" : ""));
   else if (box.states.length) parts.push(box.states.join(", "));
-  else if (box.basins.length) parts.push(box.basins.join(", "));
   return parts.length ? parts.join(" / ") : "—";
 }
 
@@ -197,7 +196,7 @@ buyersRouter.get(
       owners: b.owners.map((o) => userRef(o.user)),
       tags: b.tags.map((t) => ({ id: t.tag.id, name: t.tag.name })),
       buyBox: b.buyBox ?? {
-        states: [], counties: [], basins: [], formations: [], assetTypes: [],
+        states: [], counties: [], assetTypes: [],
         minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
       },
       closeRate: cr.rate,
@@ -619,7 +618,6 @@ buyersRouter.post(
         const union = (a: string[] = [], b: string[] = []) => uniqCI([...a, ...b]);
         const boxData = {
           states: union(tb?.states, sb.states), counties: union(tb?.counties, sb.counties),
-          basins: union(tb?.basins, sb.basins), formations: union(tb?.formations, sb.formations),
           assetTypes: union(tb?.assetTypes, sb.assetTypes),
           minAcreage: tb?.minAcreage ?? sb.minAcreage, maxAcreage: tb?.maxAcreage ?? sb.maxAcreage,
           minPrice: tb?.minPrice ?? sb.minPrice, maxPrice: tb?.maxPrice ?? sb.maxPrice,
@@ -689,7 +687,6 @@ buyersRouter.post(
               researchSummary: source.researchSummary ?? null,
               buyBox: source.buyBox ? {
                 states: source.buyBox.states, counties: source.buyBox.counties,
-                basins: source.buyBox.basins, formations: source.buyBox.formations,
                 assetTypes: source.buyBox.assetTypes,
                 minAcreage: source.buyBox.minAcreage, maxAcreage: source.buyBox.maxAcreage,
                 minPrice: source.buyBox.minPrice, maxPrice: source.buyBox.maxPrice,
@@ -771,7 +768,7 @@ buyersRouter.post(
         contactName: string | null; contactFirstName: string | null; contactLastName: string | null;
         email: string | null; phone: string | null; website: string | null; notes: string | null;
         source: string; relationshipStatus: string | null; researchSummary: unknown;
-        buyBox: { states: string[]; counties: string[]; basins: string[]; formations: string[]; assetTypes: string[]; minAcreage: number | null; maxAcreage: number | null; minPrice: number | null; maxPrice: number | null } | null;
+        buyBox: { states: string[]; counties: string[]; assetTypes: string[]; minAcreage: number | null; maxAcreage: number | null; minPrice: number | null; maxPrice: number | null } | null;
         ownerUserIds: string[]; tagIds: string[];
       };
     };
@@ -800,7 +797,13 @@ buyersRouter.post(
           source: snap.source,
           ...(snap.relationshipStatus ? { relationshipStatus: snap.relationshipStatus as never } : {}),
           ...(snap.researchSummary != null ? { researchSummary: snap.researchSummary as Prisma.InputJsonValue } : {}),
-          ...(snap.buyBox ? { buyBox: { create: snap.buyBox } } : {}),
+          // Named keys, not the stored object: snapshots taken before a buy-box
+          // column was dropped still carry it, and Prisma rejects unknown fields.
+          ...(snap.buyBox ? { buyBox: { create: {
+            states: snap.buyBox.states, counties: snap.buyBox.counties, assetTypes: snap.buyBox.assetTypes,
+            minAcreage: snap.buyBox.minAcreage, maxAcreage: snap.buyBox.maxAcreage,
+            minPrice: snap.buyBox.minPrice, maxPrice: snap.buyBox.maxPrice,
+          } } } : {}),
           owners: { create: validOwners.map((u) => ({ userId: u.id })) },
           tags: { create: validTags.map((t) => ({ tagId: t.id })) },
         },
@@ -852,8 +855,6 @@ buyersRouter.post(
 const buyBoxSchema = z.object({
   states: z.array(z.string().max(200)).max(500).default([]),
   counties: z.array(z.string().max(200)).max(500).default([]),
-  basins: z.array(z.string().max(200)).max(500).default([]),
-  formations: z.array(z.string().max(200)).max(500).default([]),
   assetTypes: z.array(z.string().max(200)).max(500).default([]),
   minAcreage: z.number().nullish(),
   maxAcreage: z.number().nullish(),

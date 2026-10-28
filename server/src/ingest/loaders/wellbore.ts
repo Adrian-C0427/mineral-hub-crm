@@ -3,12 +3,11 @@
  * records, no newlines, sorted by API). rrc.wells rows are ANCHORED by the
  * county shapefiles (geometry + fid), so this loader never inserts — it
  * UPDATEs existing wells by api8 with the master-file facts:
- * formations, plug date, lease name, survey, and (via the type-23 oil W-10)
+ * plug date, lease name, survey, and (via the type-23 oil W-10)
  * the latest oil operator number into rrc.well_status.
  *
  * Record dispatch (offsets from the validated tools/rrc extraction):
  *   type 01 root      : api8 2:10 (county 3 + unique 5) — starts a well group
- *   type 09 formation : name 5:37 (repeats; one formation per record)
  *   type 12 lease     : lease name 2:34, survey 34:82
  *   type 14 plugging  : plug date 2:10 (yyyymmdd)
  *   type 23 oil W-10  : operator no 11:17, year 17:21 — keep max year
@@ -22,7 +21,6 @@ export const DBF900_RECORD_SIZE = 247;
 
 export interface WellboreFacts {
   api8: string;
-  formations: string[];
   leaseName: string | null;
   survey: string | null;
   plugDate: string | null;
@@ -33,7 +31,7 @@ export interface WellboreFacts {
 }
 
 const newFacts = (api8: string): WellboreFacts => ({
-  api8, formations: [], leaseName: null, survey: null, plugDate: null,
+  api8, leaseName: null, survey: null, plugDate: null,
   oilOperatorNo: null, oilStatusYear: null, oilDistrict: null, oilLeaseNo: null,
 });
 
@@ -45,10 +43,7 @@ export function foldRecord(rec: Buffer, current: WellboreFacts | null): { facts:
     return { facts: /^\d{8}$/.test(api8) ? newFacts(api8) : null, isRoot: true };
   }
   if (!current) return { facts: null, isRoot: false };
-  if (type === "09") {
-    const name = decodeCp037(rec, 5, 37).trim();
-    if (name && !current.formations.includes(name)) current.formations.push(name);
-  } else if (type === "12") {
+  if (type === "12") {
     current.leaseName = decodeCp037(rec, 2, 34).trim() || current.leaseName;
     current.survey = decodeCp037(rec, 34, 82).trim() || current.survey;
   } else if (type === "14") {
@@ -90,14 +85,13 @@ export async function loadWellboreEnrichment(
     for (const f of pending) {
       const res = await prisma.$executeRawUnsafe(
         `UPDATE rrc.wells SET
-           formations = CASE WHEN cardinality($2::text[]) > 0 THEN $2::text[] ELSE formations END,
-           lease_name = COALESCE(lease_name, $3),
-           survey     = COALESCE(survey, $4),
+           lease_name = COALESCE(lease_name, $2),
+           survey     = COALESCE(survey, $3),
            -- A plug date belongs on a well only when it IS plugged (a re-entered
            -- or plugged-back wellbore keeps its old W-3 in status history).
-           plug_date  = CASE WHEN status IN ('Plugged', 'Dry Hole') THEN COALESCE($5::date, plug_date) ELSE plug_date END
+           plug_date  = CASE WHEN status IN ('Plugged', 'Dry Hole') THEN COALESCE($4::date, plug_date) ELSE plug_date END
          WHERE api8 = $1`,
-        f.api8, f.formations, f.leaseName, f.survey, f.plugDate,
+        f.api8, f.leaseName, f.survey, f.plugDate,
       );
       stats.updated += Number(res);
     }

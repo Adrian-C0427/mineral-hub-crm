@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parse a dbf900 county extract (from extract_dbf900.py) into per-API
 enrichment JSON: api8 -> {oilGas, district, leaseNo, wellNo, leaseName12,
-survey12, formations[], plugDate, plugContractor, rootDate, rootOpNo,
+survey12, plugDate, plugContractor, rootDate, rootOpNo,
 w10Year, w10OpNo, w10FieldNo}.
 
 Record-type layout (offsets within the 247-char record):
@@ -10,7 +10,6 @@ Record-type layout (offsets within the 247-char record):
                 gas: lease 3:9, district 16:18, wellNo 18:24
                 a well may have several 02s (recompletions); the LAST one is
                 the most current lease
-  09 formation  name 5:37 (one record per formation)
   12 location   leaseName 2:34, survey 34:82
   14 plugging   plug date 2:10, plugging contractor 15:47 (not the operator)
   23 W-10 (oil) operatorNo 11:17, year 17:21, fieldNo 25:33 (latest year wins)
@@ -54,12 +53,6 @@ def parse(extract_path: str) -> dict:
             elif t == "12":
                 w["leaseName12"] = r[2:34].strip()
                 w["survey12"] = r[34:82].strip()
-            elif t == "09":
-                nm = r[5:37].strip()
-                if nm:
-                    w.setdefault("formations", [])
-                    if nm not in w["formations"]:
-                        w["formations"].append(nm)
             elif t == "14":
                 w["plugDate"] = r[2:10]
                 w["plugContractor"] = r[15:47].strip()

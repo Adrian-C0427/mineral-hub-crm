@@ -44,7 +44,7 @@ interface Assumptions {
 
 interface WellRow {
   id: string; apiNumber: string | null; name: string; operator: string | null; leaseName: string | null;
-  fieldName: string | null; formation: string | null; state: string; county: string; status: string;
+  fieldName: string | null; state: string; county: string; status: string;
   trajectory: string; wellType: string | null;
   production: { firstMonth: string | null; lastMonth: string | null; months: number; cumOilBbl: number; cumGasMcf: number; cumNglBbl: number } | null;
 }
@@ -597,7 +597,6 @@ interface Dossier {
   };
   history?: { date: string | null; event: string; status: string | null; detail: string | null; source: string }[];
   sourceFiles?: { id: string; name: string | null; file: string | null; asOf: string | null }[];
-  formations: string[];
   field: { fieldNo: string | null; fieldName: string | null; reservoirs: { district: string; fieldNo: string; name: string; type: string | null }[] };
   lease: { leaseNo: string; leaseName: string | null; district: string | null; ogCode: string; wellsOnLease: number; production: { months: number; firstMonth: string | null; lastMonth: string | null; cumOilBbl: number; cumGasMcf: number } | null } | null;
   operators: { current: { operatorNo: string | null; name: string | null }; history: { operatorNo: string | null; name: string | null; source: "production" | "permit"; from: string | null; to: string | null }[] };
@@ -691,24 +690,16 @@ function WellRecord({ well }: { well: WellRow }) {
             <Kv label="RRC cumulative" value={d.cumulative ? `${fmtVol(d.cumulative.oilBbl)} bbl oil · ${fmtVol(d.cumulative.gasMcf)} mcf gas` : null} />
           </div>
 
-          {(d.formations.length > 0 || d.links) && (
+          {d.links && (
             <div className="va-rec-meta">
-              {d.formations.length > 0 && (
-                <div className="va-rec-sec">
-                  <span className="va-rec-sec-t">Formations</span>
-                  <div className="va-formations">{d.formations.map((f, i) => <span key={`${f}-${i}`} className="va-formation">{f}</span>)}</div>
+              <div className="va-rec-sec">
+                <span className="va-rec-sec-t">Railroad Commission</span>
+                <div className="va-rrc-links">
+                  <a href={d.links.rrcWellboreQuery} target="_blank" rel="noreferrer">Wellbore query ↗</a>
+                  <a href={d.links.rrcDrillingPermits} target="_blank" rel="noreferrer">Drilling permits ↗</a>
+                  <a href={d.links.rrcGisViewer} target="_blank" rel="noreferrer">GIS viewer ↗</a>
                 </div>
-              )}
-              {d.links && (
-                <div className="va-rec-sec">
-                  <span className="va-rec-sec-t">Railroad Commission</span>
-                  <div className="va-rrc-links">
-                    <a href={d.links.rrcWellboreQuery} target="_blank" rel="noreferrer">Wellbore query ↗</a>
-                    <a href={d.links.rrcDrillingPermits} target="_blank" rel="noreferrer">Drilling permits ↗</a>
-                    <a href={d.links.rrcGisViewer} target="_blank" rel="noreferrer">GIS viewer ↗</a>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           )}
 

@@ -339,7 +339,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       id: string; operatorNorm: string; leaseName: string | null; wellName: string | null;
       status: ResearchPermitStatus; trajectory: WellTrajectory;
       filedDate: Date | null; approvedDate: Date | null; spudDate: Date | null; completionDate: Date | null;
-      formation: string | null; field: string | null; totalDepth: number | null; abstractId: string | null;
+      field: string | null; totalDepth: number | null; abstractId: string | null;
       latitude: number | null; longitude: number | null;
     };
     const existingPermits = await prisma.researchPermit.findMany({
@@ -348,7 +348,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         id: true, state: true, county: true, apiNumber: true, permitNumber: true,
         operatorNorm: true, leaseName: true, wellName: true, status: true, trajectory: true,
         filedDate: true, approvedDate: true, spudDate: true, completionDate: true,
-        formation: true, field: true, totalDepth: true, abstractId: true, latitude: true, longitude: true,
+        field: true, totalDepth: true, abstractId: true, latitude: true, longitude: true,
       },
     });
     const identityKey = (s: string, c: string, api: string | null, permit: string | null) =>
@@ -357,14 +357,14 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     const fullSig = (p: Omit<PermitCmp, "id">, s: string, c: string, api: string | null, permit: string | null) => [
       s, c, normField(api), normField(permit), p.operatorNorm, normField(p.leaseName), normField(p.wellName),
       p.status, p.trajectory ?? "", day(p.filedDate), day(p.approvedDate), day(p.spudDate), day(p.completionDate),
-      normField(p.formation), normField(p.field), p.totalDepth ?? "", normField(p.abstractId), p.latitude ?? "", p.longitude ?? "",
+      normField(p.field), p.totalDepth ?? "", normField(p.abstractId), p.latitude ?? "", p.longitude ?? "",
     ].join("|");
     const sameFields = (a: Omit<PermitCmp, "id">, b: Omit<PermitCmp, "id">) =>
       a.operatorNorm === b.operatorNorm && normField(a.leaseName) === normField(b.leaseName) &&
       normField(a.wellName) === normField(b.wellName) && a.status === b.status && a.trajectory === b.trajectory &&
       day(a.filedDate) === day(b.filedDate) && day(a.approvedDate) === day(b.approvedDate) &&
       day(a.spudDate) === day(b.spudDate) && day(a.completionDate) === day(b.completionDate) &&
-      normField(a.formation) === normField(b.formation) && normField(a.field) === normField(b.field) &&
+      normField(a.field) === normField(b.field) &&
       (a.totalDepth ?? null) === (b.totalDepth ?? null) && normField(a.abstractId) === normField(b.abstractId) &&
       (a.latitude ?? null) === (b.latitude ?? null) && (a.longitude ?? null) === (b.longitude ?? null);
 
@@ -385,7 +385,6 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         leaseName: get(row, "leaseName"), wellName: get(row, "wellName"), status: get(row, "status"),
         filedDate: get(row, "filedDate"), approvedDate: get(row, "approvedDate"),
         state: get(row, "state") || fallbackState || "", county: get(row, "county") || fallbackCounty || "",
-        formation: get(row, "formation"),
       };
       if (!operator) { record(i, "REJECTED", "Missing operator", data); continue; }
       const rowState = get(row, "state") ? normState(get(row, "state")) : fallbackState;
@@ -404,7 +403,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         leaseName: get(row, "leaseName") || null, wellName: get(row, "wellName") || null,
         status: classifyPermitStatus(get(row, "status")), trajectory: classifyTrajectory(get(row, "trajectory")),
         filedDate, approvedDate, spudDate, completionDate,
-        formation: get(row, "formation") || null, field: get(row, "field") || null,
+        field: get(row, "field") || null,
         totalDepth: numOf(get(row, "totalDepth")), abstractId: get(row, "abstractId") || null,
         latitude: numOf(get(row, "latitude")), longitude: numOf(get(row, "longitude")),
       };
@@ -420,7 +419,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
               operator, operatorNorm: incoming.operatorNorm, leaseName: incoming.leaseName, wellName: incoming.wellName,
               status: incoming.status, trajectory: incoming.trajectory,
               activityDate, filedDate, approvedDate, spudDate, completionDate,
-              formation: incoming.formation, field: incoming.field, totalDepth: incoming.totalDepth,
+              field: incoming.field, totalDepth: incoming.totalDepth,
               abstractId: incoming.abstractId, latitude: incoming.latitude, longitude: incoming.longitude,
             },
           });
@@ -441,7 +440,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         leaseName: incoming.leaseName, wellName: incoming.wellName,
         status: incoming.status, trajectory: incoming.trajectory,
         activityDate, filedDate, approvedDate, spudDate, completionDate,
-        formation: incoming.formation, field: incoming.field,
+        field: incoming.field,
         totalDepth: incoming.totalDepth,
         abstractId: incoming.abstractId,
         latitude: incoming.latitude, longitude: incoming.longitude,

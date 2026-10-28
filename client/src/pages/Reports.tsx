@@ -76,8 +76,6 @@ interface Analytics {
   series: MonthPoint[];
   breakdowns: {
     counties: { name: string; count: number }[];
-    basins: { name: string; count: number }[];
-    formations: { name: string; count: number }[];
     assetTypes: { name: string; count: number }[];
     perUser: { userId: string; name: string; created: number; closed: number; activity: number }[];
   };
@@ -86,7 +84,7 @@ interface Analytics {
   closedWithoutDate: number;
 }
 interface FilterOpts {
-  counties: string[]; basins: string[]; formations: string[]; assetTypes: string[]; operators: string[];
+  counties: string[]; assetTypes: string[]; operators: string[];
   buyers: { id: string; name: string }[]; users: { id: string; name: string }[]; stages: string[];
 }
 
@@ -128,7 +126,7 @@ function compareRange(mode: Compare, from: string, to: string): { from: string; 
   return { from: iso(prevFrom), to: iso(prevTo) };
 }
 
-const EMPTY_FILTERS: Record<string, string[]> = { states: [], counties: [], basins: [], formations: [], assetTypes: [], operators: [], stages: [], buyers: [], users: [] };
+const EMPTY_FILTERS: Record<string, string[]> = { states: [], counties: [], assetTypes: [], operators: [], stages: [], buyers: [], users: [] };
 
 // Customize View — which KPI metrics show, and in what order (saved per user).
 type MetricId =
@@ -245,9 +243,6 @@ export function Reports() {
   // Customize View — per-chart visualization type (saved per user).
   const [activityType, setActivityType] = useChartType("reports-activity", ["bar", "line"], "bar");
   const [assetType, setAssetType] = useChartType("reports-asset-types", ["pie", "bar"], "pie");
-  // "Most active" panel consolidates the county/formation/basin breakdowns into
-  // one card with a segmented selector (reference layout).
-  const [geoView, setGeoView] = useState<"counties" | "formations" | "basins">("counties");
 
   // On phones the period tray scrolls sideways: keep the active period in view.
   const periodRef = useRef<HTMLDivElement>(null);
@@ -450,8 +445,7 @@ export function Reports() {
               labels={{ state: "States", county: "Counties" }}
             />
             {opts && ([
-              ["basins", "Basins", opts.basins],
-              ["formations", "Formations", opts.formations], ["assetTypes", "Asset types", opts.assetTypes],
+              ["assetTypes", "Asset types", opts.assetTypes],
               ["operators", "Operators", opts.operators], ["stages", "Deal status", opts.stages],
             ] as [string, string, string[]][]).map(([key, label, options]) => (
               <div key={key} className="field">
@@ -674,13 +668,9 @@ export function Reports() {
             </section>
             <section className="panel rp-chart">
               <div className="rp-chart-head">
-                <h3>Most active</h3>
-                <Segmented ariaLabel="Breakdown dimension" value={geoView} onChange={setGeoView}
-                  options={[{ value: "counties", label: "Counties" }, { value: "formations", label: "Formations" }, { value: "basins", label: "Basins" }]} />
+                <h3>Most active counties</h3>
               </div>
-              {geoView === "counties" && <RankedRows data={data.breakdowns.counties} onClick={(name) => drillByDeal(`County: ${name}`, (dd) => dd.counties.includes(name))} />}
-              {geoView === "formations" && <RankedRows data={data.breakdowns.formations} onClick={(name) => drillByDeal(`Formation: ${name}`, (dd) => dd.formations.includes(name))} />}
-              {geoView === "basins" && <RankedRows data={data.breakdowns.basins} onClick={(name) => drillByDeal(`Basin: ${name}`, (dd) => dd.basins.includes(name))} />}
+              <RankedRows data={data.breakdowns.counties} onClick={(name) => drillByDeal(`County: ${name}`, (dd) => dd.counties.includes(name))} />
             </section>
           </div>
         </div>

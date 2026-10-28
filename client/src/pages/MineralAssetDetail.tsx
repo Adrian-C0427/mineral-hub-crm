@@ -21,7 +21,6 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, useAbstractIndex, abstractEntryShortLabel, SurveyMultiPicker } from "../components/AbstractPicker";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { GeoTagFields } from "../components/GeoTagFields";
 import { OperatorSelect } from "../components/OperatorSelect";
 import { perAcreRates } from "../lib/perAcre";
 import { monthLabel, chartTooltip } from "../lib/charts";
@@ -346,7 +345,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
 
   async function save() {
     await api.patch(`/deals/${asset.id}`, {
-      counties: f.counties, states: f.states ?? [], basins: f.basins, formations: f.formations,
+      counties: f.counties, states: f.states ?? [],
       operator: f.operator, abstractIds: f.abstractIds, surveys: f.surveys, wells: f.wells,
       producingStatus: f.producingStatus, notes: f.notes,
     });
@@ -360,8 +359,6 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
           <KV k="State" v={(asset.states?.length ? asset.states : (asset.state ? [asset.state] : [])).join(", ")} />
           <KV k="Counties" v={asset.counties.join(", ")} />
           <KV k="Producing Status" v={asset.producingStatus} />
-          <KV k="Basins" v={asset.basins.join(", ")} />
-          <KV k="Formations" v={asset.formations.join(", ")} />
           <KV k="Operator" v={asset.operator} />
           <KV k="Surveys" v={asset.surveys?.join(", ")} />
           <KV k="Abstracts" v={abstractLabel || null} />
@@ -377,7 +374,6 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
             labels={{ county: "Counties", abstract: "Abstracts" }}
           />
           <Fld l="Producing Status"><Select value={f.producingStatus ?? ""} onChange={(v) => setF({ ...f, producingStatus: v })} placeholder="—" clearable ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
-          <GeoTagFields autoFill labels={{ basin: "Basins", formation: "Formations" }} basins={f.basins} onBasinsChange={(v) => setF((p) => ({ ...p, basins: v }))} formations={f.formations} onFormationsChange={(v) => setF((p) => ({ ...p, formations: v }))} abstractIds={f.abstractIds} counties={f.counties} states={f.states?.length ? f.states : (f.state ? [f.state] : [])} />
           <Fld l="Operator"><OperatorSelect states={f.states?.length ? f.states : (f.state ? [f.state] : [])} counties={f.counties} value={f.operator ?? ""} onChange={(v) => setF({ ...f, operator: v })} /></Fld>
           <Fld l="Surveys"><SurveyMultiPicker value={f.surveys ?? []} onChange={(v) => setF({ ...f, surveys: v })} abstractIds={f.abstractIds} /></Fld>
           <Fld l="Wells"><SearchableMultiSelect options={[]} value={f.wells ?? []} onChange={(v) => setF({ ...f, wells: v })} placeholder="Type a well name/API, Enter" /></Fld>

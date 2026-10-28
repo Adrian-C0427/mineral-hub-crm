@@ -33,8 +33,6 @@ const DEAL_WORKFLOW: Prisma.DealWhereInput = {
 const filterSchema = z.object({
   status: z.string().optional(), // "ACTIVE" (default) | "ALL" | a specific Stage
   county: z.string().optional(),
-  basin: z.string().optional(),
-  formation: z.string().optional(),
   assetType: z.string().optional(),
 });
 
@@ -58,7 +56,6 @@ mapRouter.get(
       select: {
         id: true, name: true, pipelineId: true, stage: true, currentStageEnteredAt: true, sellerName: true, companyName: true,
         state: true, county: true, abstract: true, survey: true, estAcres: true, estNma: true, estNra: true, nextFollowUpDate: true,
-        basins: true, formations: true,
         owner: { select: userRefSelect }, contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -102,7 +99,6 @@ mapRouter.get(
         seller: seller || null, company: r.contact?.entityName ?? r.companyName ?? null,
         state: r.state, county: r.county, abstract: r.abstract, survey: r.survey,
         estAcres: r.estAcres, estNma: r.estNma, estNra: r.estNra, nextFollowUpDate: r.nextFollowUpDate,
-        basins: r.basins, formations: r.formations,
         owner: userRef(r.owner),
         abstractId, placement, lon: pt?.lon ?? null, lat: pt?.lat ?? null,
       };
@@ -132,8 +128,6 @@ mapRouter.get(
       where.stage = ACTIVE_FILTER;
     }
     if (f.county) where.counties = { has: f.county };
-    if (f.basin) where.basins = { has: f.basin };
-    if (f.formation) where.formations = { has: f.formation };
     if (f.assetType) where.assetTypes = { has: f.assetType };
 
     const deals = await prisma.deal.findMany({
@@ -161,8 +155,6 @@ mapRouter.get(
           state: s.state,
           operator: s.operator,
           assetTypes: s.assetTypes,
-          basins: s.basins,
-          formations: s.formations,
           acreageNma: s.acreageNma,
           nra: s.nra,
           askPrice: s.askPrice,
@@ -205,13 +197,11 @@ mapRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const deals = await prisma.deal.findMany({
       where: { organizationId: orgId(req), abstractIds: { isEmpty: false } },
-      select: { counties: true, basins: true, formations: true, assetTypes: true },
+      select: { counties: true, assetTypes: true },
     });
     const uniq = (vals: string[][]) => [...new Set(vals.flat())].filter(Boolean).sort();
     res.json({
       counties: uniq(deals.map((d) => d.counties)),
-      basins: uniq(deals.map((d) => d.basins)),
-      formations: uniq(deals.map((d) => d.formations)),
       assetTypes: uniq(deals.map((d) => d.assetTypes)),
     });
   }),

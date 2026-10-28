@@ -108,7 +108,7 @@ describe("calendar event links", () => {
   it("drops deal and buyer names the caller cannot see (pure mapping)", () => {
     const row = { ...eventRow(), buyer: null };
     expect(eventEntry(row, { deals: false, buyers: true }).link).toBeNull();
-    expect(eventEntry({ ...row, deal: null, buyer: { id: "b1", name: "Basin Peak" } }, { deals: true, buyers: false }).link).toBeNull();
+    expect(eventEntry({ ...row, deal: null, buyer: { id: "b1", name: "Summit Peak" } }, { deals: true, buyers: false }).link).toBeNull();
     expect(eventEntry(row).link).toEqual({ kind: "deal", id: "deal_1", label: "Smith #3 – Freestone" });
   });
 

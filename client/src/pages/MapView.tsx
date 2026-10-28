@@ -9,8 +9,7 @@ import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION, PARISHES, STATE_FIPS, MAP_COUNTY_LABELS, mapCountyOptions } from "../lib/counties";
-import { addCadastralLayers, addTractLayers, addUnitLayers, addLateralLayers, addLeaseTractLayers, addGeoRegionLayers, tractInfo, unitInfo, unitColor, lateralInfo, leaseInfo, regionInfo, TRACT_SOURCE, UNIT_SOURCE, UNIT_PALETTE, LATERAL_SOURCE, LATERAL_COLOR, LEASE_SOURCE, LEASE_COLOR, OPP_COLOR, STATUS_COLOR, GEO_SOURCE, PLAY_SOURCE, BASIN_PALETTE, PLAY_COLOR, type TractInfo, type UnitInfo, type LateralInfo, type LeaseInfo, type RegionInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
-import { useGeoCatalog } from "../lib/geoContext";
+import { addCadastralLayers, addTractLayers, addUnitLayers, addLateralLayers, addLeaseTractLayers, tractInfo, unitInfo, unitColor, lateralInfo, leaseInfo, TRACT_SOURCE, UNIT_SOURCE, UNIT_PALETTE, LATERAL_SOURCE, LATERAL_COLOR, LEASE_SOURCE, LEASE_COLOR, OPP_COLOR, STATUS_COLOR, type TractInfo, type UnitInfo, type LateralInfo, type LeaseInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { normalizeWellStatus, SOURCE_LABEL, STATUS_COLORS, STATUS_FLAG_LABEL, WELL_STATUSES } from "../lib/wellStatus";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { FormSection } from "../components/kit";
@@ -38,7 +37,7 @@ interface MapDeal {
   /** OWNED_ASSET here is always an asset actively marketed for sale. */
   recordType?: "OPPORTUNITY" | "OWNED_ASSET";
   priority: "HIGH" | "MEDIUM" | "LOW"; counties: string[]; state: string | null;
-  operator: string | null; assetTypes: string[]; basins: string[]; formations: string[];
+  operator: string | null; assetTypes: string[];
   acreageNma: number | null; nra: number | null; askPrice: number | null;
   profitEst: number | null; selectedBuyer: { id: string; name: string } | null;
 }
@@ -48,7 +47,6 @@ interface MapOpp {
   id: string; name: string; pipelineId: string; stage: string; currentStageEnteredAt: string;
   seller: string | null; company: string | null; state: string | null; county: string | null; abstract: string | null; survey: string | null;
   estAcres: number | null; estNma: number | null; estNra: number | null; nextFollowUpDate: string | null;
-  basins: string[]; formations: string[];
   owner: UserRef | null; abstractId: string | null; placement: "abstract" | "label" | null; lon: number | null; lat: number | null;
 }
 /** An owned mineral asset on HOLD — shown as a Mineral Asset, never a deal. */
@@ -78,7 +76,7 @@ type WellRefresh = {
   /** Acres RRC's proration schedule assigns the well (may be a share of the unit). */
   assignedAcres?: number | null; assignedAcresYm?: string | null;
 };
-type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[];
+type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[];
   /** "TX" | "LA" (tile `state`); Louisiana wells carry their SONRIS record in `la`. */
   state?: string; la?: LaWellDetail } & WellRefresh;
 type SelWell = { kind: "well" } & WellProps;
@@ -87,12 +85,11 @@ type SelTract = { kind: "tract" } & TractInfo;
 type SelUnit = { kind: "unit" } & UnitInfo;
 type SelLateral = { kind: "lateral" } & LateralInfo;
 type SelLease = { kind: "lease" } & LeaseInfo;
-type SelRegion = { kind: "region" } & RegionInfo;
 /** A wellbore whose surface well is outside the refreshed counties (only the bore is on the map). */
 type SelBore = { kind: "bore"; fid: number; surfaceId: number; api: string | null; wellboreType: string | null; boreStatus: string | null; bhSource: string | null };
 /** One or more opportunities at the clicked marker (several prospects can share an abstract). */
 type SelOpp = { kind: "opportunity"; abstractId: string | null; opps: MapOpp[] };
-type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelUnit | SelLateral | SelLease | SelBore | SelOpp | SelRegion | null;
+type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelUnit | SelLateral | SelLease | SelBore | SelOpp | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -107,7 +104,6 @@ interface Suggest {
   wells: { fid: number; label: string; sub: string }[];
   operators: { name: string; sub: string; bbox: BBox | null }[];
   fields: { name: string; sub: string; bbox: BBox | null }[];
-  formations: { name: string; sub: string; bbox: BBox | null }[];
   deals: { id: string; label: string; sub: string; abstractIds: string[] }[];
   assets: { id: string; label: string; sub: string; abstractIds: string[] }[];
 }
@@ -123,19 +119,16 @@ const MAP_LAYERS_KEY = "mh-map-layers:v1";
 const MAP_DOCK_KEY = "mh-map-dock:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
 const MAP_FILTERS_KEY = "mh-map-filters:v1";
-type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; basins: boolean; plays: boolean; deals: boolean; assets: boolean; opportunities: boolean; wells: boolean; wellbores: boolean; tracts: boolean; units: boolean; laterals: boolean; leases: boolean };
+type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; opportunities: boolean; wells: boolean; wellbores: boolean; tracts: boolean; units: boolean; laterals: boolean; leases: boolean };
 // W-1 laterals start off: RRC's wellbores already show the same wells, and the plat lines are a check against them.
-// Basins start on (a faint regional tint + names); play outlines start off — they are a lot of dashed line over the same ground.
-const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, basins: true, plays: false, deals: true, assets: true, opportunities: true, wells: true, wellbores: true, tracts: true, units: true, laterals: false, leases: true };
+const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, opportunities: true, wells: true, wellbores: true, tracts: true, units: true, laterals: false, leases: true };
 interface MapCam { center: [number, number]; zoom: number }
 /** A named, reusable combination of every filter on the Filters panel. */
 interface MapFilterState {
   status: string; states?: string[]; counties: string[]; surveys: string[]; abstracts: string[];
-  wellTypes: string[]; wellStatuses: string[]; operators: string[]; formations: string[];
+  wellTypes: string[]; wellStatuses: string[]; operators: string[];
   /** Wellbore profile (added with the 2026-10 RRC refresh; absent in older presets). */
   profiles?: string[];
-  /** Basin tags on deals / opportunities (added 2026-10; absent in older presets). */
-  basins?: string[];
 }
 interface FilterPreset { name: string; filters: MapFilterState }
 function loadJson<T>(key: string, fallback: T): T {
@@ -145,7 +138,7 @@ function saveJson(key: string, value: unknown) { try { localStorage.setItem(key,
 
 const GROUP_LABELS: Record<keyof Suggest, string> = {
   counties: "Counties & parishes", townships: "Townships", abstracts: "Abstracts, surveys & sections", wells: "Wells & leases",
-  operators: "Operators", fields: "Fields", formations: "Formations",
+  operators: "Operators", fields: "Fields",
   deals: "Deals", assets: "Mineral assets",
 };
 
@@ -242,11 +235,6 @@ export function MapView() {
   const [fProfiles, setFProfiles] = useState<string[]>([]);
   const [fWellStatuses, setFWellStatuses] = useState<string[]>([]);
   const [fOperators, setFOperators] = useState<string[]>([]);
-  const [fFormations, setFFormations] = useState<string[]>([]);
-  // Basin tags on deals / opportunities (the records' own Basin field). Hides
-  // non-matching deal markers, like the well filters hide wells.
-  const [fBasins, setFBasins] = useState<string[]>([]);
-  const geoCatalog = useGeoCatalog();
   const [query, setQuery] = useState("");
   const [prod, setProd] = useState<Record<string, [number, number, number][]>>({});
   const [meta, setMeta] = useState<{ counties: string[] }>({ counties: [] });
@@ -286,7 +274,8 @@ export function MapView() {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, []);
   const [recents, setRecents] = useState<Recent[]>(() => {
-    try { return JSON.parse(sessionStorage.getItem(RECENTS_KEY) ?? "[]") as Recent[]; } catch { return []; }
+    // Recents saved by an older build can name a search group that no longer exists.
+    try { return (JSON.parse(sessionStorage.getItem(RECENTS_KEY) ?? "[]") as Recent[]).filter((r) => r.t in GROUP_LABELS); } catch { return []; }
   });
 
   // --- Production heat map ---
@@ -314,13 +303,11 @@ export function MapView() {
   const setHeatK = <K extends keyof HeatState>(k: K, v: HeatState[K]) => setHeat((p) => ({ ...p, [k]: v }));
   const heatActive = heat.oil || heat.gas;
 
-  const inBasin = (basins: string[]) => !fBasins.length || basins.some((b) => fBasins.includes(b));
   const dealsByAbstract = useMemo(() => {
     const m = new Map<string, MapDeal[]>();
-    for (const d of deals ?? []) if (inBasin(d.basins)) for (const aid of d.abstractIds) { const a = m.get(aid) ?? []; a.push(d); m.set(aid, a); }
+    for (const d of deals ?? []) for (const aid of d.abstractIds) { const a = m.get(aid) ?? []; a.push(d); m.set(aid, a); }
     return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deals, fBasins]);
+  }, [deals]);
   const assetsByAbstract = useMemo(() => {
     const m = new Map<string, MapAsset[]>();
     for (const a of assets) for (const aid of a.abstractIds) { const l = m.get(aid) ?? []; l.push(a); m.set(aid, l); }
@@ -330,10 +317,7 @@ export function MapView() {
   // the filters are about wells. Grouped per abstract: one marker per place.
   const oppsInView = useMemo(() => opps.filter((o) =>
     (!fStates.length || (o.state != null && fStates.includes(o.state)))
-    && inBasin(o.basins ?? [])
-    && (!fCounties.length || (o.county != null && fCounties.some((c) => c.toLowerCase() === o.county!.toLowerCase() || c.toLowerCase().endsWith(`|${o.county!.toLowerCase()}`))))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [opps, fStates, fCounties, fBasins]);
+    && (!fCounties.length || (o.county != null && fCounties.some((c) => c.toLowerCase() === o.county!.toLowerCase() || c.toLowerCase().endsWith(`|${o.county!.toLowerCase()}`))))), [opps, fStates, fCounties]);
   const oppsByAbstract = useMemo(() => {
     const m = new Map<string, MapOpp[]>();
     for (const o of oppsInView) if (o.abstractId) { const l = m.get(o.abstractId) ?? []; l.push(o); m.set(o.abstractId, l); }
@@ -352,20 +336,6 @@ export function MapView() {
   }), [oppsByAbstract]);
   oppsByAbstractRef.current = oppsByAbstract; oppsFcRef.current = oppsFc;
 
-  // Formation options come from the heat-map wells (static Leon/Freestone
-  // production data — the formation filter only affects the heat layer until
-  // phase B5 moves production server-side). Everything else is API-driven.
-  const scoped = useMemo(() => {
-    const inC = (c: unknown) => fCounties.length === 0 || fCounties.includes(c as string);
-    const wel = (wellsFC.current?.features ?? []).filter((f) => inC(f.properties.county));
-    const forms = wel.flatMap((f) => Array.isArray(f.properties.formations) ? (f.properties.formations as string[]) : []);
-    return { formations: [...new Set(forms.filter(Boolean))].sort() };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fCounties, meta, heatData]);
-  const basinFilterOptions = useMemo(() => [...new Set([
-    ...(geoCatalog ? [...geoCatalog.basins.map((b) => b.name), ...geoCatalog.subBasins.map((b) => b.name)] : []),
-    ...(deals ?? []).flatMap((d) => d.basins), ...opps.flatMap((o) => o.basins ?? []),
-  ])].sort(), [geoCatalog, deals, opps]);
 
   useEffect(() => {
     if (mapRef.current || !mapContainer.current) return;
@@ -400,16 +370,12 @@ export function MapView() {
         wellsFC.current = welFC;
         heatWells.current = extractWells(welFC.features);
         perLease.current = wellsPerLease(heatWells.current);
-        setHeatData((n) => n + 1); // formations options + heat recompute pick up the wells
+        setHeatData((n) => n + 1); // heat recompute picks up the wells
       });
 
       // Shared cadastral source + layer stack (counties, abstracts, wells,
       // wellbores, labels) — identical to the deal map via lib/mapLayers.
       addCadastralLayers(map, countyLabels as unknown as GeoJSON.FeatureCollection);
-      // Basins / sub-basins / plays (reference geology, all orgs) under the
-      // abstract mesh: a tint and a name at regional zooms, outlines above.
-      addGeoRegionLayers(map, "abstracts-fill");
-      void loadGeoRegions();
 
       // Imported tract boundaries (user-uploaded shapefiles, org-scoped) —
       // the same overlay the deal maps draw (see addTractLayers).
@@ -573,20 +539,9 @@ export function MapView() {
             return;
           }
         }
-        // Otherwise an abstract (toggle) — or, where no abstract is drawn (regional
-        // zooms, outside the cadastral coverage), the play or basin under the click.
+        // Otherwise an abstract (toggle).
         const feats = map.queryRenderedFeatures(e.point, { layers: ["abstracts-fill"] });
-        if (feats.length === 0) {
-          const regionLayers = [...(layersRef.current.plays ? ["plays-fill"] : []), ...(layersRef.current.basins ? ["basins-fill"] : [])].filter((l) => map.getLayer(l));
-          const rf = regionLayers.length ? map.queryRenderedFeatures(e.point, { layers: regionLayers }) : [];
-          if (rf.length) {
-            const sub = rf.find((f) => f.properties?.kind === "subbasin" || f.properties?.kind === "play") ?? rf[0];
-            clearSelection();
-            setSelected({ kind: "region", ...regionInfo(sub.properties as Record<string, unknown>) });
-            return;
-          }
-          clearSelection(); return;
-        }
+        if (feats.length === 0) { clearSelection(); return; }
         const id = feats[0].properties?.id as string;
         if (selAbstractRef.current === id) { clearSelection(); return; }
         selectAbstract(id, feats[0].properties as Record<string, unknown>);
@@ -635,7 +590,7 @@ export function MapView() {
   }, []);
 
   function toWellProps(p: Record<string, unknown>): WellProps {
-    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null, district: (p.district as string) || null, cumOil: p.cumOil != null ? Number(p.cumOil) : null, cumGas: p.cumGas != null ? Number(p.cumGas) : null, lastProd: (p.lastProd as string) || null, formations: Array.isArray(p.formations) ? (p.formations as string[]).join(", ") : ((p.formations as string) || null), state: (p.state as string) || undefined };
+    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null, district: (p.district as string) || null, cumOil: p.cumOil != null ? Number(p.cumOil) : null, cumGas: p.cumGas != null ? Number(p.cumGas) : null, lastProd: (p.lastProd as string) || null, state: (p.state as string) || undefined };
   }
   function clearSelection() {
     const map = mapRef.current;
@@ -686,7 +641,6 @@ export function MapView() {
       if (d.state === "LA") selectWell({ ...toWellProps(d), state: "LA", la: d as unknown as LaWellDetail });
       else selectWell({
         ...toWellProps(d),
-        formations: Array.isArray(d.formations) ? (d.formations as string[]).join(", ") : null,
         spudDate: (d.spudDate as string | null)?.slice(0, 10) ?? null,
         plugDate: (d.plugDate as string | null)?.slice(0, 10) ?? null,
         unitAcres: d.unitAcres != null ? Number(d.unitAcres) : null,
@@ -759,8 +713,6 @@ export function MapView() {
     vis("laterals-line", L.laterals); vis("laterals-point", L.laterals);
     vis("leases-fill", L.leases); vis("leases-line", L.leases); vis("leases-label", L.leases);
     vis("opps-point", L.opportunities); vis("opps-count", L.opportunities); vis("opps-sel", L.opportunities);
-    for (const id of ["basins-fill", "basins-line", "subbasins-line", "basins-label"]) vis(id, L.basins);
-    for (const id of ["plays-fill", "plays-line", "plays-label"]) vis(id, L.plays);
     applyHighlight();
   }
   // Filter behavior: filters never restyle the map — instead the map zooms to
@@ -801,7 +753,7 @@ export function MapView() {
     const spec = periodWindow(h.period, latestMonth(prod), h.from, h.to);
     periodLabelRef.current = spec.label;
     heatPointsRef.current = buildPoints(heatWells.current, perLease.current, prod as never, spec,
-      { counties: fCounties, operators: fOperators, wellTypes: fWellTypes, wellStatuses: fWellStatuses, formations: fFormations });
+      { counties: fCounties, operators: fOperators, wellTypes: fWellTypes, wellStatuses: fWellStatuses });
     setRank(heatPointsRef.current.length ? rankings(heatPointsRef.current) : null);
     pushHeat();
   }
@@ -976,8 +928,8 @@ export function MapView() {
   useEffect(() => {
     if (!filtersTouched.current) { filtersTouched.current = true; return; }
     // Auto-zoom is a GEOGRAPHIC affordance: only State / County / Survey /
-    // Abstract participate. Attribute filters (well type/status, operator,
-    // formation) narrow what's shown without moving the camera.
+    // Abstract participate. Attribute filters (well type/status, operator)
+    // narrow what's shown without moving the camera.
     const groups: [string, string[]][] = [
       ["states", fStates], ["counties", fCounties], ["surveys", fSurveys], ["abstracts", fAbstracts],
     ];
@@ -995,7 +947,7 @@ export function MapView() {
   }, [fStates, fCounties, fSurveys, fAbstracts]);
   // Rebuild heat points whenever the data, filters, period, or thresholds change.
   useEffect(() => { if (heatReady) recomputeHeat(); /* eslint-disable-next-line */ },
-    [heatReady, heatData, prod, fCounties, fOperators, fWellTypes, fWellStatuses, fFormations, heat.period, heat.from, heat.to, heat.min, heat.max, heat.oil, heat.gas, heat.hotspots]);
+    [heatReady, heatData, prod, fCounties, fOperators, fWellTypes, fWellStatuses, heat.period, heat.from, heat.to, heat.min, heat.max, heat.oil, heat.gas, heat.hotspots]);
   // Cheap paint/visibility tweaks don't need a recompute.
   useEffect(() => { applyHeatPaint(); /* eslint-disable-next-line */ }, [heat.intensity, heat.radius, heat.opacity]);
   useEffect(() => { applyHeatVisibility(); /* eslint-disable-next-line */ }, [heat.topProducers, heat.oil, heat.gas, heat.hotspots]);
@@ -1035,7 +987,6 @@ export function MapView() {
       case "abstracts": void selectAbstractById(String(p.id)); break;
       case "wells": void openWell(Number(p.fid), true); break;
       case "operators": setFOperators((prev) => (prev.includes(String(p.name)) ? prev : [...prev, String(p.name)])); fitBbox(p.bbox as BBox | null); break;
-      case "formations": setFFormations((prev) => (prev.includes(String(p.name)) ? prev : [...prev, String(p.name)])); fitBbox(p.bbox as BBox | null); break;
       case "fields": fitBbox(p.bbox as BBox | null); break;
       case "deals": case "assets": void zoomToAbstracts((p.abstractIds as string[]) ?? []); break;
     }
@@ -1052,7 +1003,6 @@ export function MapView() {
     for (const w of sug.wells) out.push({ t: "wells", label: w.label, sub: w.sub, p: { fid: w.fid } });
     for (const o of sug.operators) out.push({ t: "operators", label: o.name, sub: o.sub, p: { name: o.name, bbox: o.bbox } });
     for (const f of sug.fields) out.push({ t: "fields", label: f.name, sub: f.sub, p: { bbox: f.bbox } });
-    for (const f of sug.formations) out.push({ t: "formations", label: f.name, sub: f.sub, p: { name: f.name, bbox: f.bbox } });
     for (const d of sug.deals) out.push({ t: "deals", label: d.label, sub: d.sub, p: { abstractIds: d.abstractIds } });
     for (const d of sug.assets) out.push({ t: "assets", label: d.label, sub: d.sub, p: { abstractIds: d.abstractIds } });
     return out;
@@ -1082,12 +1032,6 @@ export function MapView() {
       (mapRef.current?.getSource(UNIT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
     } catch { /* overlay is optional — the map works without it */ }
   }
-  // Basins / sub-basins and plays: static reference geology (server bundle, ETag-revalidated).
-  async function loadGeoRegions() {
-    const put = (source: string, fc: GeoJSON.FeatureCollection) => (mapRef.current?.getSource(source) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
-    try { put(GEO_SOURCE, await api.get<GeoJSON.FeatureCollection>("/geo/regions?kind=basin,subbasin")); } catch { /* optional overlay */ }
-    try { put(PLAY_SOURCE, await api.get<GeoJSON.FeatureCollection>("/geo/regions?kind=play")); } catch { /* optional overlay */ }
-  }
   // W-1 laterals and lease tracts: the same kind of static reference data.
   async function loadLaterals() {
     try {
@@ -1116,8 +1060,7 @@ export function MapView() {
   function currentFilters(): MapFilterState {
     return {
       status: statusFilter, states: fStates, counties: fCounties, surveys: fSurveys, abstracts: fAbstracts,
-      wellTypes: fWellTypes, profiles: fProfiles, wellStatuses: fWellStatuses, operators: fOperators, formations: fFormations,
-      basins: fBasins,
+      wellTypes: fWellTypes, profiles: fProfiles, wellStatuses: fWellStatuses, operators: fOperators,
     };
   }
   function persistFilterPresets(next: FilterPreset[]) {
@@ -1138,7 +1081,7 @@ export function MapView() {
     setFWellTypes((f.wellTypes ?? []).filter((t) => !legacyProfiles.includes(t)));
     setFProfiles([...new Set([...(f.profiles ?? []), ...legacyProfiles])]);
     setFWellStatuses([...new Set((f.wellStatuses ?? []).map(normalizeWellStatus))]);
-    setFOperators(f.operators ?? []); setFFormations(f.formations ?? []); setFBasins(f.basins ?? []);
+    setFOperators(f.operators ?? []);
   }
   function deleteFilterPreset(name: string) {
     persistFilterPresets(filterPresets.filter((p) => p.name !== name));
@@ -1148,13 +1091,13 @@ export function MapView() {
     const cur = JSON.stringify(currentFilters());
     return filterPresets.find((p) => JSON.stringify({ ...p.filters, status: p.filters.status ?? "ACTIVE" }) === cur)?.name ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterPresets, statusFilter, fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fProfiles, fWellStatuses, fOperators, fFormations, fBasins]);
+  }, [filterPresets, statusFilter, fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fProfiles, fWellStatuses, fOperators]);
   // Filters button badge: how many filter groups are set (deal status counts
   // once it is anything other than the default "Active Deals").
   const filterCount = (statusFilter !== "ACTIVE" ? 1 : 0) +
-    [fStates, fCounties, fSurveys, fAbstracts, fBasins, fWellTypes, fProfiles, fWellStatuses, fOperators, fFormations].filter((v) => v.length > 0).length;
-  const anyFilterSet = fStates.length > 0 || fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 || fBasins.length > 0 ||
-    fWellTypes.length > 0 || fProfiles.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0 || fFormations.length > 0;
+    [fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fProfiles, fWellStatuses, fOperators].filter((v) => v.length > 0).length;
+  const anyFilterSet = fStates.length > 0 || fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
+    fWellTypes.length > 0 || fProfiles.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0;
   // Size the map to fill from its top down to the viewport bottom (footer), with
   // a small gap — recomputed on resize and whenever the controls row changes
   // height (a panel opening/closing), so there is never blank space below it.
@@ -1234,7 +1177,7 @@ export function MapView() {
   const clearAllFilters = () => {
     setStatusFilter("ACTIVE");
     setFStates([]); setFCounties([]); setFSurveys([]); setFAbstracts([]);
-    setFWellTypes([]); setFProfiles([]); setFWellStatuses([]); setFOperators([]); setFFormations([]); setFBasins([]);
+    setFWellTypes([]); setFProfiles([]); setFWellStatuses([]); setFOperators([]);
   };
 
   return (
@@ -1388,9 +1331,7 @@ export function MapView() {
             storageKey="mh-mainmap-layers-open"
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
-              { key: "surveyNames", label: "Survey names" },
-              { key: "basins", label: "Basins" }, { key: "plays", label: "Plays (formation outlines)" },
-              { key: "deals", label: "Active deals" },
+              { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
               { key: "assets", label: "Mineral assets" },
               { key: "opportunities", label: "Opportunities" },
               { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores + bottom holes" },
@@ -1454,14 +1395,11 @@ export function MapView() {
                   <MapField label="County / Parish"><SearchableMultiSelect options={fStates.length ? mapCountyOptions(fStates) : meta.counties} labels={MAP_COUNTY_LABELS} value={fCounties} onChange={setFCounties} placeholder="Counties or parishes…" /></MapField>
                   <MapField label="Abstract / Section" count={gisOptions.abstracts.length || undefined}><SearchableMultiSelect options={abstractFilterOptions} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} disabled={!fCounties.length && !fAbstracts.length} placeholder={fCounties.length ? "Abstract #, section or survey…" : "Choose a county first"} /></MapField>
                   <MapField label="Survey / Township"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys or townships…" /></MapField>
-                  {/* Basin: the deals' and opportunities' own Basin tags (the geology catalog + whatever the records carry). */}
-                  <MapField label="Basin"><SearchableMultiSelect options={basinFilterOptions} value={fBasins} onChange={setFBasins} placeholder="Basins (deal tags)…" /></MapField>
                   <div className="mc-divider" />
                   <MapField label="Well Type"><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></MapField>
                   <MapField label="Wellbore Profile"><SearchableMultiSelect options={gisOptions.wellProfiles ?? []} value={fProfiles} onChange={setFProfiles} placeholder="Vertical, horizontal, directional…" /></MapField>
                   <MapField label="Well Status"><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></MapField>
                   <MapField label="Operator" count={gisOptions.operators.length}><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></MapField>
-                  <MapField label="Formation" count={scoped.formations.length}><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></MapField>
                 </div>
                 {/* Saved filters: load (name), overwrite (↻) and delete (×) per chip;
                     "Save Current" opens the name field. Saving an existing name
@@ -1555,7 +1493,6 @@ export function MapView() {
                     <div className="mc-rank">
                       <RankList title="Top counties" rows={rank.counties} />
                       <RankList title="Top operators" rows={rank.operators} />
-                      <RankList title="Top formations" rows={rank.formations} />
                     </div>
                   </FormSection>
                 )}
@@ -1589,8 +1526,6 @@ export function MapView() {
             <div className="mcx-legend-rows">
               {WELL_STATUSES.map((st) => <Legend key={st} color={STATUS_COLORS[st]} label={st} />)}
               {layers.opportunities && <Legend color={OPP_COLOR} label="Opportunity (prospect)" />}
-              {layers.basins && <Legend color={BASIN_PALETTE[0]} stripes={BASIN_PALETTE} label="Basin (dashed = sub-basin)" />}
-              {layers.plays && <Legend color={PLAY_COLOR} label="Play outline" dashed />}
               {layers.wellbores && <Legend color="#0f766e" label="Wellbore path" line />}
               {layers.wellbores && <Legend color="#0f766e" label="Bottom hole" ring />}
               {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
@@ -1666,9 +1601,6 @@ export function MapView() {
                   {selected.unitAcres != null && selected.assignedAcres != null && <KV k="Acres assigned" v={`${acres(selected.assignedAcres)} ac`} />}
                 </div>
                 <WellBoresBlock w={selected} />
-                {selected.formations && (
-                  <div className="kv" style={{ marginTop: 8 }}><span className="k">Formations (RRC W-2)</span><span className="v wrap">{selected.formations}</span></div>
-                )}
                 {(selected.cumOil != null || selected.cumGas != null) && (
                   <>
                     <div className="mc-fp-sec">Lease production (RRC)</div>
@@ -1720,7 +1652,7 @@ export function MapView() {
                 <Link className="primary mc-fp-cta" to={`/valuation?fid=${selected.fid}&well=${encodeURIComponent(selected.api || selected.api8 || "")}`}>
                   Open in Well Analysis →
                 </Link>
-                <p className="mc-fp-note">Operator, lease, field, dates, permits, and completions are from RRC records (lease-level; oil is reported per lease). Formation shows where a W-2 was filed.</p>
+                <p className="mc-fp-note">Operator, lease, field, dates, permits, and completions are from RRC records (lease-level; oil is reported per lease).</p>
               </>
             ) : selected.kind === "bore" ? (
               <>
@@ -1772,8 +1704,6 @@ export function MapView() {
               <LateralPanel lat={selected} onClose={clearSelection} />
             ) : selected.kind === "lease" ? (
               <LeasePanel lease={selected} onClose={clearSelection} />
-            ) : selected.kind === "region" ? (
-              <RegionPanel region={selected} onClose={clearSelection} onFilter={(name) => { setFBasins((p) => (p.includes(name) ? p : [...p, name])); setShowFilters(true); }} />
             ) : selected.kind === "tract" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>{selected.dealId && <div style={{ fontSize: 12, marginTop: 2 }}>From deal <Link to={`/deals/${selected.dealId}`}>{selected.dealName ?? "Open deal"}</Link></div>}</div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
@@ -1856,30 +1786,6 @@ function MapField({ label, count, children }: { label: string; count?: number; c
 }
 
 /** A clicked pooled unit: what the plat calls it, the wells pooled into it, and how its outline was placed. */
-/** A basin, sub-basin or play clicked where no abstract is drawn. */
-function RegionPanel({ region, onClose, onFilter }: { region: RegionInfo; onClose: () => void; onFilter: (basinName: string) => void }) {
-  const kind = region.regionKind === "play" ? "Play" : region.regionKind === "subbasin" ? "Sub-basin" : "Basin";
-  const color = region.regionKind === "play" ? PLAY_COLOR : BASIN_PALETTE[region.colorIndex % BASIN_PALETTE.length];
-  return (
-    <>
-      <div className="section-head"><div><h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden style={{ width: 12, height: 12, borderRadius: 2, flex: "none", background: color }} />{region.name}</h3><div className="muted" style={{ fontSize: 12 }}>{[kind, region.parentName ? `in the ${region.parentName}` : null].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
-      <div className="dd-grid mc-kv" style={{ marginTop: 6 }}>
-        {region.formation && <KV k="Formation" v={region.formation} />}
-        {region.parentName && <KV k="Basin" v={region.parentName} />}
-        <KV k="Source" v={region.sources || null} />
-      </div>
-      {region.regionKind !== "play" && (
-        <p style={{ fontSize: 12, margin: "8px 0 0" }}><button type="button" className="small" onClick={() => onFilter(region.name)}>Show only deals tagged {region.name}</button></p>
-      )}
-      <p className="mc-fp-note">
-        {region.regionKind === "play"
-          ? "Regional play outline (EIA / USGS assessment units). A tract inside it is prospective for the formation, not necessarily productive — the wells on the tract decide."
-          : "Geologic province outline (EPA / AAPG; sub-basins from EIA). Lines are generalized — a tract near the edge may sit either side. Deals and prospects carry their own Basin tag, suggested from this map when they are created."}
-      </p>
-    </>
-  );
-}
-
 function UnitPanel({ unit, onClose }: { unit: UnitInfo; onClose: () => void }) {
   const acres = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ac`;
   const diffPct = unit.calledAcres > 0 ? (100 * (unit.mappedAcres - unit.calledAcres)) / unit.calledAcres : null;

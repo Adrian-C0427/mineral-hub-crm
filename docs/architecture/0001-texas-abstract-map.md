@@ -11,7 +11,7 @@ We want an interactive map that shows all **active deals** across Texas on top o
 the **actual survey/abstract boundaries** (not points, not county outlines). Users
 must see which specific abstracts contain activity, zoom/pan smoothly with the
 boundaries always visible, click a highlighted abstract to see deal details, and
-filter by county/basin/formation/asset type/status.
+filter by county/asset type/status.
 
 Texas is the hard case: it never adopted the federal PLSS (township/range/section).
 It uses **abstracts/surveys** from Spanish, Mexican, and Republic-era land grants —
@@ -122,7 +122,7 @@ Framework, DB, and rendering are unchanged. PLSS comes free from **BLM CadNSDI**
 5. **Active-deal highlight** — `GET /api/map/active-abstracts` returns active ids +
    summary; client applies `feature-state`; click → popup with name/status/county/
    operator/asset type/NMA/NRA.
-6. **Filters** — county/basin/formation/asset type/stage drive the highlight query.
+6. **Filters** — county/asset type/stage drive the highlight query.
 7. **Generalization checkpoint** — introduce `survey_unit`; ingest one PLSS state from
    BLM CadNSDI to prove the abstraction before committing to nationwide.
 

@@ -4,7 +4,7 @@ import { dealFacts, type DealContext } from "./ai.js";
 const base: DealContext = {
   name: "Reagan County Royalties", stage: "SENT_TO_BUYERS", recordType: "OPPORTUNITY",
   state: "TX", states: ["TX"], counties: ["Reagan", "Irion"],
-  operator: "Pioneer Natural Resources", assetTypes: ["Royalty"], basins: ["Permian"], formations: ["Wolfcamp"],
+  operator: "Pioneer Natural Resources", assetTypes: ["Royalty"],
   acreageNma: 120.5, nra: 15.25, askPrice: 450000, ourPrice: 300000, estimatedClosingCosts: 5000,
   sellerNames: ["Smith Family Trust"], selectedBuyer: null,
   dateUnderContract: "2026-06-01", originalClosingDate: "2026-07-15",
@@ -26,12 +26,12 @@ describe("dealFacts", () => {
   it("omits missing/empty fields entirely (no blank lines, no invented data)", () => {
     const sparse: DealContext = {
       ...base, operator: null, ourPrice: null, askPrice: null, notes: null,
-      basins: [], formations: [], sellerNames: [], counties: [],
+      sellerNames: [], counties: [],
     };
     const f = dealFacts(sparse);
     expect(f).not.toContain("Operator");
     expect(f).not.toContain("Ask price");
-    expect(f).not.toContain("Basins");
+    expect(f).not.toContain("Counties");
     expect(f).not.toMatch(/^-\s*$/m); // no empty bullet lines
   });
 

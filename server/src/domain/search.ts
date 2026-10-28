@@ -50,7 +50,7 @@ export function isSearchableTerm(term: string): boolean {
   return term.trim().length >= MIN_SEARCH_CHARS;
 }
 
-/** One entry in a precomputed reference list (operators, fields, formations). */
+/** One entry in a precomputed reference list (operators, fields). */
 export interface RefEntry {
   name: string;
   n: number;

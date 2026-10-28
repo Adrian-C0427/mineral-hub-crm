@@ -1124,7 +1124,7 @@ researchRouter.post(
             aliases: proposal.aliases,
             source: "research",
             researchSummary: summaryFor(proposal) as unknown as Prisma.InputJsonValue,
-            buyBox: { create: { counties: proposal.counties, states: proposal.states, basins: [], formations: [], assetTypes: [] } },
+            buyBox: { create: { counties: proposal.counties, states: proposal.states, assetTypes: [] } },
             tags: { create: { tagId: tag.id } },
           },
         });
@@ -1154,7 +1154,7 @@ researchRouter.post(
           if (eb.buyBox) {
             await tx.buyBoxCriteria.update({ where: { buyerId: eb.id }, data: { counties: [...eb.buyBox.counties, ...plan.addCounties], states: [...eb.buyBox.states, ...plan.addStates] } });
           } else {
-            await tx.buyBoxCriteria.create({ data: { buyerId: eb.id, counties: plan.addCounties, states: plan.addStates, basins: [], formations: [], assetTypes: [] } });
+            await tx.buyBoxCriteria.create({ data: { buyerId: eb.id, counties: plan.addCounties, states: plan.addStates, assetTypes: [] } });
           }
           await tx.activityLog.create({
             data: {
@@ -1384,7 +1384,6 @@ const PERMIT_SORT_COLUMNS: Record<string, { column: string; nullable?: boolean }
   abstractId: { column: "abstractId", nullable: true },
   survey: { column: "survey", nullable: true },
   leaseName: { column: "leaseName", nullable: true },
-  formation: { column: "formation", nullable: true },
   apiNumber: { column: "apiNumber", nullable: true },
 };
 
@@ -1620,7 +1619,6 @@ function applyPermitSearch(where: Prisma.ResearchPermitWhereInput, q?: string, i
       { operator: contains(q) }, { leaseName: contains(q) }, { wellName: contains(q) },
       { apiNumber: contains(q) }, { permitNumber: contains(q) },
       { county: contains(q) }, { abstractId: contains(q) }, { survey: contains(q) },
-      { formation: contains(q) },
     ];
   }
 }

@@ -19,7 +19,7 @@ statewide daf802 operator dictionary.
 
 Also fills: leaseNo/district/oilGas (dbf900 record 02), leaseName (record 12
 or permit), field (record-23 fieldNo via the PDQ field dictionary),
-formations (record 09), and lastProd (from the production series).
+and lastProd (from the production series).
 
 Runs passes until a fixed point: wells enriched in one pass join the sibling
 dictionary for the next, so operator names propagate across shared leases.
@@ -187,7 +187,7 @@ def run_pass(args, db, permits, daf_ops, gse_ops, wells_by_county, prod, passno)
                     p["operator"], p["operatorNo"] = op_name(d["rootOpNo"]), d["rootOpNo"]
                     st["op_from_root"] += 1
 
-            # leaseName / field / formations fills
+            # leaseName / field fills
             if not p.get("leaseName"):
                 if d.get("leaseName12"):
                     p["leaseName"] = d["leaseName12"]
@@ -200,9 +200,6 @@ def run_pass(args, db, permits, daf_ops, gse_ops, wells_by_county, prod, passno)
                 if fn:
                     p["field"], p["fieldNo"] = fn, d["w10FieldNo"]
                     st["field_filled"] += 1
-            if not p.get("formations") and d.get("formations"):
-                p["formations"] = d["formations"]
-                st["formations_filled"] += 1
 
             # lastProd from the production series
             k = prodkey()
