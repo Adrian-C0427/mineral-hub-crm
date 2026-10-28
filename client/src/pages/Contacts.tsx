@@ -32,7 +32,10 @@ import type { UserLite, UserRef } from "../types";
 export interface ContactRow {
   id: string;
   firstName: string;
+  /** Optional; shown between the first and last name. */
+  middleName?: string | null;
   lastName: string;
+  /** First, middle and last name (blanks skipped). */
   name: string;
   entityName: string | null;
   type: string;
@@ -335,6 +338,7 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
 }) {
   const [f, setF] = useState({
     firstName: contact?.firstName ?? "",
+    middleName: contact?.middleName ?? "",
     lastName: contact?.lastName ?? "",
     entityName: contact?.entityName ?? "",
     type: contact?.type ?? "PROSPECT",
@@ -359,6 +363,7 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
     setBusy(true); setError(null);
     const body = {
       firstName: f.firstName.trim(),
+      middleName: f.middleName.trim() || null,
       lastName: f.lastName.trim(),
       entityName: f.entityName.trim() || null,
       type: f.type,
@@ -401,6 +406,7 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
       <FormSection title="Identity">
         <div className="nd-grid3">
           <div className="field"><label>First name <Req /></label><input value={f.firstName} onChange={(e) => set("firstName")(e.target.value)} autoFocus /></div>
+          <div className="field"><label>Middle name</label><input value={f.middleName} onChange={(e) => set("middleName")(e.target.value)} placeholder="Optional" /></div>
           <div className="field"><label>Last name <Req /></label><input value={f.lastName} onChange={(e) => set("lastName")(e.target.value)} /></div>
           <div className="field"><label>Company / entity</label><input value={f.entityName} onChange={(e) => set("entityName")(e.target.value)} placeholder="Trust, LLC, family entity…" /></div>
         </div>
@@ -782,6 +788,7 @@ const EXPORT_COLUMNS: { key: string; label: string; value: (r: ContactRow, lists
   { key: "mailingState", label: "Mailing State", value: (r) => r.mailingState ?? null },
   { key: "mailingZip", label: "Mailing Zip", value: (r) => r.mailingZip ?? null },
   { key: "preferredContact", label: "Preferred Contact", value: (r) => preferredContactLabel(r.preferredContact) },
+  { key: "middleName", label: "Middle Name", value: (r) => r.middleName ?? null },
 ];
 const DEFAULT_EXPORT_KEYS = ["firstName", "lastName", "entityName", "type", "status", "email", "phone", "counties", "owner"];
 

@@ -17,7 +17,8 @@ import {
 } from "../domain/opportunities.js";
 import { dealDetail } from "./deals.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
-import { CONTACT_EDIT_FORBIDDEN, contactPatchFromSellerPatch, contactSyncFor, opportunitySellerFromInfo, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type ContactAccess, type SellerInfo } from "../domain/sellerContact.js";
+import { CONTACT_EDIT_FORBIDDEN, contactPatchFromSellerPatch, contactSyncFor, opportunitySellerFromInfo, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type ContactAccess, type SellerContactRow, type SellerInfo } from "../domain/sellerContact.js";
+import { contactName } from "../domain/contactName.js";
 import { splitPersonName } from "../domain/opportunities.js";
 
 /**
@@ -144,11 +145,14 @@ const createSchema = z.object({
 const updateSchema = z.object({ name: z.string().trim().min(1).max(200).optional(), ...editableFields, seller: sellerInfoSchema.optional() });
 
 /** Seller edits mirrored onto the linked Contact: the plain columns a PATCH
- *  names, as Contact fields (a seller name splits into first/last). */
-function contactSyncFromOppPatch(f: { sellerName?: string | null; companyName?: string | null; phone?: string | null; email?: string | null }) {
-  const name = f.sellerName !== undefined ? splitPersonName(f.sellerName) : null;
+ *  names, as Contact fields. A seller name that still reads as the contact's
+ *  full name (middle name included) leaves the name alone; a new one splits
+ *  into first/last and replaces the middle name. */
+function contactSyncFromOppPatch(f: { sellerName?: string | null; companyName?: string | null; phone?: string | null; email?: string | null }, current: SellerContactRow) {
+  const unchanged = f.sellerName !== undefined && (f.sellerName ?? "").trim().replace(/\s+/g, " ").toLowerCase() === contactName(current).toLowerCase();
+  const name = f.sellerName !== undefined && !unchanged ? splitPersonName(f.sellerName) : null;
   return contactPatchFromSellerPatch({
-    ...(name ? { firstName: name.firstName, lastName: name.lastName } : {}),
+    ...(name ? { firstName: name.firstName, middleName: null, lastName: name.lastName } : {}),
     ...(f.companyName !== undefined ? { companyName: f.companyName } : {}),
     ...(f.phone !== undefined ? { primaryPhone: f.phone } : {}),
     ...(f.email !== undefined ? { email: f.email } : {}),
@@ -402,7 +406,7 @@ opportunitiesRouter.patch(
         Object.assign(patch, opportunitySellerFromInfo(data.seller as SellerInfo, contact, access.view));
         // The block's values are the shared ones: mirror them onto the contact.
         const sync = contactPatchFromSellerPatch({
-          ...(data.seller.firstName != null || data.seller.lastName != null ? { firstName: data.seller.firstName, lastName: data.seller.lastName } : {}),
+          ...(data.seller.firstName != null || data.seller.lastName != null ? { firstName: data.seller.firstName, middleName: data.seller.middleName, lastName: data.seller.lastName } : {}),
           ...(data.seller.companyName != null ? { companyName: data.seller.companyName } : {}),
           ...(data.seller.phone != null ? { primaryPhone: data.seller.phone } : {}),
           ...(data.seller.email != null ? { email: data.seller.email } : {}),
@@ -418,7 +422,7 @@ opportunitiesRouter.patch(
         const linked = (fields.contactId as string | null | undefined) ?? (fields.contactId === null ? null : o.contactId);
         const current = linked ? await tx.contact.findFirst({ where: { id: linked, organizationId: org }, select: sellerContactSelect }) : null;
         if (current) {
-          const sync = contactSyncFromOppPatch(fields as { sellerName?: string | null; companyName?: string | null; phone?: string | null; email?: string | null });
+          const sync = contactSyncFromOppPatch(fields as { sellerName?: string | null; companyName?: string | null; phone?: string | null; email?: string | null }, current);
           await applyContactSync(tx, access, sync, current);
         }
       }

@@ -28,7 +28,7 @@ ensureDirectUrl();
 // one of these as a failed migration (P3009), clearing its record and
 // re-applying is safe. Scoped by exact name so an unrelated failure is never
 // auto-cleared — it must still surface and fail the deploy.
-const RECOVERABLE = ["20260715180000_buyer_tag_per_org", "20261027120000_drop_basins_formations"];
+const RECOVERABLE = ["20260715180000_buyer_tag_per_org", "20261027120000_drop_basins_formations", "20261028120000_contact_middle_name"];
 
 function prisma(args) {
   const r = spawnSync("npx", ["prisma", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });

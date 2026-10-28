@@ -1,3 +1,4 @@
+import { contactName as contactDisplayName } from "./contactName.js";
 import { resolveDealDates, type DealDateInputs } from "./dates.js";
 
 /**
@@ -216,7 +217,7 @@ export function followUpEntry(a: FollowUpRow, followTypeId: string | null): CalE
 export interface TaskRow {
   id: string; kind: string; title: string | null; body: string; dueDate: Date | null; completedAt: Date | null;
   assignedTo: CalPerson | null;
-  contact: { id: string; firstName: string | null; lastName: string | null; entityName: string | null } | null;
+  contact: { id: string; firstName: string | null; middleName?: string | null; lastName: string | null; entityName: string | null } | null;
 }
 
 /** An open contact task / reminder (or a standalone Dashboard task) with a due date. */
@@ -225,7 +226,7 @@ export function taskEntry(t: TaskRow, followTypeId: string | null): CalEntry | n
   const reminder = t.kind === "REMINDER";
   // Same naming as the Tasks widget: the title doubles as the body when no details were given.
   const title = t.title ?? t.body;
-  const contactName = t.contact ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact" : null;
+  const contactName = t.contact ? contactDisplayName(t.contact) || "Contact" : null;
   return derived({
     id: `${reminder ? "reminder" : "task"}:${t.id}`,
     source: reminder ? "reminder" : "task",

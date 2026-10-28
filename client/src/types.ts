@@ -334,7 +334,7 @@ export interface ContactMineralInterest {
 
 /** The linked seller Contact as the opportunity shows it. */
 export interface OppContact {
-  id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null;
+  id: string; firstName: string; middleName?: string | null; lastName: string; entityName: string | null; phone: string | null; email: string | null;
   preferredContact?: string | null;
   mailingStreet?: string | null; mailingCity?: string | null; mailingState?: string | null; mailingZip?: string | null;
 }

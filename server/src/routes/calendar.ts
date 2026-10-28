@@ -138,7 +138,7 @@ calendarRouter.get(
         select: {
           id: true, kind: true, title: true, body: true, dueDate: true, completedAt: true,
           assignedTo: { select: userRefSelect },
-          contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+          contact: { select: { id: true, firstName: true, middleName: true, lastName: true, entityName: true } },
         },
       }),
     ]);

@@ -1,3 +1,4 @@
+import { contactName } from "./contactName.js";
 import { z } from "zod";
 import { parseDayKey } from "./calendar.js";
 
@@ -147,7 +148,7 @@ export interface TaskAlertRow {
   completedAt: Date | null;
   assignedToId: string | null;
   createdById: string | null;
-  contact: { id: string; firstName: string | null; lastName: string | null; entityName: string | null } | null;
+  contact: { id: string; firstName: string | null; middleName?: string | null; lastName: string | null; entityName: string | null } | null;
 }
 
 /**
@@ -158,7 +159,7 @@ export interface TaskAlertRow {
  */
 export function taskDueNotice(t: TaskAlertRow, now: Date): { userId: string | null; title: string; body: string; link: string } | null {
   if (t.completedAt || !t.dueDate || t.dueDate.getTime() > now.getTime()) return null;
-  const who = t.contact ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "contact" : null;
+  const who = t.contact ? contactName(t.contact) || "contact" : null;
   const overdueDays = Math.floor((now.getTime() - t.dueDate.getTime()) / 86_400_000);
   const label = (t.title ?? t.body).slice(0, 80);
   const when = overdueDays > 0 ? `${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : "due today.";
