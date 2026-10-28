@@ -6,6 +6,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { dealStatus } from "../domain/stages.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
+import { personName } from "../domain/contactName.js";
 import { parse } from "csv-parse/sync";
 import { LIST_LIMIT, MAX_CSV_CHARS } from "../config.js";
 import type { Contact, ContactActivity, ContactList, User } from "@prisma/client";
@@ -35,8 +36,9 @@ type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name" | "firstName
 const serialize = (c: ContactWithOwner) => ({
   id: c.id,
   firstName: c.firstName,
+  middleName: c.middleName,
   lastName: c.lastName,
-  name: `${c.firstName} ${c.lastName}`.trim(),
+  name: personName(c),
   entityName: c.entityName,
   type: c.type,
   status: c.status,
@@ -70,6 +72,8 @@ const optionalText = (max: number) => z.string().trim().max(max).nullish().trans
 // under it) — sellers created from a deal or opportunity can be either.
 const contactNameFields = z.object({
   firstName: z.string().trim().max(200),
+  // Optional; a blank clears it (stored NULL).
+  middleName: optionalText(200),
   lastName: z.string().trim().max(200),
   entityName: z.string().trim().max(300).nullish(),
 });
@@ -133,6 +137,7 @@ contactsRouter.post(
         organizationId: orgId(req),
         // An entity-only contact is filed under its entity name.
         firstName: data.firstName || (data.lastName ? "" : data.entityName ?? ""),
+        middleName: data.middleName ?? null,
         lastName: data.lastName,
         entityName: data.entityName ?? null,
         type: data.type ?? "PROSPECT",
@@ -173,6 +178,7 @@ contactsRouter.patch(
       where: { id: existing.id },
       data: {
         ...(data.firstName !== undefined ? { firstName: data.firstName } : {}),
+        ...(data.middleName !== undefined ? { middleName: data.middleName ?? null } : {}),
         ...(data.lastName !== undefined ? { lastName: data.lastName } : {}),
         ...(data.entityName !== undefined ? { entityName: data.entityName ?? null } : {}),
         ...(data.type !== undefined ? { type: data.type } : {}),
@@ -636,6 +642,7 @@ contactsRouter.post(
 
 const CONTACT_IMPORT_FIELDS: { key: string; label: string; required?: boolean }[] = [
   { key: "firstName", label: "First Name", required: true },
+  { key: "middleName", label: "Middle Name" },
   { key: "lastName", label: "Last Name", required: true },
   { key: "entityName", label: "Company / Entity" },
   { key: "type", label: "Type" },
@@ -696,6 +703,8 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 const splitMulti = (v: string): string[] => v.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
 const normPhone = (v: string): string => v.replace(/\D/g, "");
+const sameName = (a: { firstName: string; lastName: string }, b: { firstName: string; lastName: string }) =>
+  a.firstName.trim().toLowerCase() === b.firstName.trim().toLowerCase() && a.lastName.trim().toLowerCase() === b.lastName.trim().toLowerCase();
 
 /** Map a CSV "preferred contact" cell to its key; anything unrecognised is left blank. */
 const PREFERRED_ALIASES: Record<string, (typeof PREFERRED_CONTACTS)[number]> = {
@@ -708,6 +717,7 @@ function buildContact(row: Record<string, string>, mapping: Record<string, strin
   const status = get("status").toUpperCase().replace(/\s+/g, "_");
   return {
     firstName: get("firstName"),
+    middleName: get("middleName").slice(0, 200) || null,
     lastName: get("lastName"),
     entityName: get("entityName") || null,
     type: (CONTACT_TYPES as readonly string[]).includes(type) ? type : "PROSPECT",
@@ -738,6 +748,7 @@ contactsRouter.post(
     const suggestedMapping: Record<string, string> = {};
     const SYNONYMS: Record<string, string[]> = {
       firstName: ["first name", "firstname", "first"],
+      middleName: ["middle name", "middlename", "middle", "middle initial", "mi"],
       lastName: ["last name", "lastname", "last", "surname"],
       entityName: ["company", "entity", "trust", "organization"],
       type: ["type", "contact type"],
@@ -808,7 +819,7 @@ contactsRouter.post(
     res.json({
       rows: classified.slice(0, 500).map((r) => ({
         index: r.index, status: r.status, reason: r.reason,
-        name: `${r.contact.firstName} ${r.contact.lastName}`.trim(), email: r.contact.email, phone: r.contact.phone,
+        name: personName(r.contact), email: r.contact.email, phone: r.contact.phone,
       })),
       counts: {
         new: classified.filter((r) => r.status === "New").length,
@@ -882,6 +893,8 @@ contactsRouter.post(
           where: { id: ex.id },
           data: {
             entityName: ex.entityName ?? r.contact.entityName,
+            // The file's middle name fills a blank one only for the same first + last name.
+            middleName: ex.middleName ?? (sameName(ex, r.contact) ? r.contact.middleName : null),
             source: ex.source ?? r.contact.source,
             email: ex.email ?? r.contact.email,
             phone: ex.phone ?? r.contact.phone,

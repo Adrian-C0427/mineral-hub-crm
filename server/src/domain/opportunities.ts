@@ -100,6 +100,7 @@ export interface ConvertibleOpportunity {
 /** The linked Contact fields conversion reads (the seller record is built from these). */
 export interface ConvertibleContact {
   firstName: string;
+  middleName?: string | null;
   lastName: string;
   entityName: string | null;
   phone: string | null;
@@ -196,6 +197,7 @@ export function convertedSeller(o: ConvertibleOpportunity, contact: ConvertibleC
     return {
       isPrimary: true,
       firstName: clean(contact.firstName),
+      middleName: clean(contact.middleName),
       lastName: clean(contact.lastName),
       companyName: clean(contact.entityName),
       primaryPhone: phone ? normalizePhone(phone) : null,
@@ -212,6 +214,7 @@ export function convertedSeller(o: ConvertibleOpportunity, contact: ConvertibleC
     return {
       isPrimary: true,
       firstName: clean(contact.firstName),
+      middleName: clean(contact.middleName),
       lastName: clean(contact.lastName),
       companyName: clean(contact.entityName),
       primaryPhone: phone ? normalizePhone(phone) : null,
@@ -279,7 +282,7 @@ export interface OpportunityRow {
 }
 
 export interface OpportunityContactRow {
-  id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null;
+  id: string; firstName: string; middleName?: string | null; lastName: string; entityName: string | null; phone: string | null; email: string | null;
   preferredContact?: string | null;
   mailingStreet?: string | null; mailingCity?: string | null; mailingState?: string | null; mailingZip?: string | null;
 }
@@ -338,7 +341,7 @@ export function serializeOpportunity(o: OpportunityDetailRow) {
     notes: o.notes,
     contact: o.contact
       ? {
-          id: o.contact.id, firstName: o.contact.firstName, lastName: o.contact.lastName, entityName: o.contact.entityName,
+          id: o.contact.id, firstName: o.contact.firstName, middleName: o.contact.middleName ?? null, lastName: o.contact.lastName, entityName: o.contact.entityName,
           phone: o.contact.phone, email: o.contact.email, preferredContact: o.contact.preferredContact ?? null,
           mailingStreet: o.contact.mailingStreet ?? null, mailingCity: o.contact.mailingCity ?? null,
           mailingState: o.contact.mailingState ?? null, mailingZip: o.contact.mailingZip ?? null,

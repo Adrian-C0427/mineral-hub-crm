@@ -11,6 +11,7 @@ import { serializeDeal } from "../serializers.js";
 import { TERMINAL_STAGE_KEYS, OPPORTUNITY_TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 import { isAbstractId, normalizeAbstractId } from "../domain/opportunities.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
+import { contactName } from "../domain/contactName.js";
 import { parseShapefileUpload, MAX_TRACT_FEATURES, MAX_ORG_TRACT_BYTES, type UploadedFile } from "../domain/shpImport.js";
 import { env } from "../config.js";
 
@@ -39,13 +40,13 @@ const filterSchema = z.object({
 /**
  * Opportunities (prospects in Opportunity pipelines) for the main map's
  * Opportunities layer: every unconverted, non-terminal opportunity of the
- * caller's org, read from the opportunity records themselves, with a point to
- * draw it at. Placement is honest about what is known: an opportunity whose
- * abstract is a GIS abstract gets that abstract's representative point; one
- * whose abstract was typed as a label ("A-15") is placed on the one GIS
+ * caller's org, read from the opportunity records themselves, with the GIS
+ * abstract it sits on. The layer only tints that abstract — it adds no marker
+ * and is not a well. An opportunity whose abstract is a GIS abstract id uses
+ * it; one whose abstract was typed as a label ("A-15") resolves to the one GIS
  * abstract with that label in its county/state when exactly one exists; any
- * other opportunity has no point and is listed without one. Nothing is
- * copied into a separate map table.
+ * other opportunity has no abstract and is not drawn. Nothing is copied into a
+ * separate map table.
  */
 mapRouter.get(
   "/opportunities",
@@ -56,51 +57,39 @@ mapRouter.get(
       select: {
         id: true, name: true, pipelineId: true, stage: true, currentStageEnteredAt: true, sellerName: true, companyName: true,
         state: true, county: true, abstract: true, survey: true, estAcres: true, estNma: true, estNra: true, nextFollowUpDate: true,
-        owner: { select: userRefSelect }, contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+        owner: { select: userRefSelect }, contact: { select: { id: true, firstName: true, middleName: true, lastName: true, entityName: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 5000,
     });
-    type Pt = { lon: number; lat: number };
-    const byId = new Map<string, Pt>();
-    const byLabel = new Map<string, { id: string; pt: Pt } | null>(); // null = ambiguous
-    const gisIds = [...new Set(rows.filter((r) => isAbstractId(r.abstract)).map((r) => normalizeAbstractId(r.abstract!)))];
+    const byLabel = new Map<string, string | null>(); // label key → GIS abstract id (null = ambiguous)
     const labelled = rows.filter((r) => r.abstract && !isAbstractId(r.abstract) && r.county && r.state);
     const labelKey = (label: string, county: string, state: string) => `${label.trim().toUpperCase()}|${county.trim().toUpperCase()}|${state.trim().toUpperCase()}`;
     try {
-      if (gisIds.length) {
-        const pts = await prisma.$queryRawUnsafe<{ id: string; lon: number; lat: number }[]>(
-          `SELECT id, ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat FROM gis.abstracts WHERE id = ANY($1::text[])`, gisIds);
-        for (const p of pts) byId.set(p.id, { lon: Number(p.lon), lat: Number(p.lat) });
-      }
       if (labelled.length) {
         const labels = [...new Set(labelled.map((r) => r.abstract!.trim().toUpperCase()))];
-        const hits = await prisma.$queryRawUnsafe<{ id: string; abstract: string; county: string; state: string; lon: number; lat: number }[]>(
-          `SELECT id, upper(abstract) AS abstract, county, state, ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
-             FROM gis.abstracts WHERE upper(abstract) = ANY($1::text[])`, labels);
+        const hits = await prisma.$queryRawUnsafe<{ id: string; abstract: string; county: string; state: string }[]>(
+          `SELECT id, upper(abstract) AS abstract, county, state FROM gis.abstracts WHERE upper(abstract) = ANY($1::text[])`, labels);
         for (const h of hits) {
           const k = labelKey(h.abstract, h.county, h.state);
-          byLabel.set(k, byLabel.has(k) ? null : { id: h.id, pt: { lon: Number(h.lon), lat: Number(h.lat) } });
+          byLabel.set(k, byLabel.has(k) ? null : h.id);
         }
       }
     } catch {
-      // GIS schema unavailable (local/dev): opportunities are still listed, without points.
+      // GIS schema unavailable (local/dev): labelled opportunities stay off the map.
     }
     res.json(rows.map((r) => {
-      let abstractId: string | null = null; let pt: Pt | null = null; let placement: "abstract" | "label" | null = null;
-      if (isAbstractId(r.abstract)) { abstractId = normalizeAbstractId(r.abstract!); pt = byId.get(abstractId) ?? null; placement = pt ? "abstract" : null; }
-      else if (r.abstract && r.county && r.state) {
-        const hit = byLabel.get(labelKey(r.abstract, r.county, r.state));
-        if (hit) { abstractId = hit.id; pt = hit.pt; placement = "label"; }
-      }
-      const seller = r.contact ? ([r.contact.firstName, r.contact.lastName].filter(Boolean).join(" ") || r.contact.entityName) : (r.sellerName || r.companyName);
+      const abstractId = isAbstractId(r.abstract) ? normalizeAbstractId(r.abstract!)
+        : r.abstract && r.county && r.state ? byLabel.get(labelKey(r.abstract, r.county, r.state)) ?? null
+        : null;
+      const seller = r.contact ? contactName(r.contact) : (r.sellerName || r.companyName);
       return {
         id: r.id, name: r.name, pipelineId: r.pipelineId, stage: r.stage, currentStageEnteredAt: r.currentStageEnteredAt,
         seller: seller || null, company: r.contact?.entityName ?? r.companyName ?? null,
         state: r.state, county: r.county, abstract: r.abstract, survey: r.survey,
         estAcres: r.estAcres, estNma: r.estNma, estNra: r.estNra, nextFollowUpDate: r.nextFollowUpDate,
         owner: userRef(r.owner),
-        abstractId, placement, lon: pt?.lon ?? null, lat: pt?.lat ?? null,
+        abstractId,
       };
     }));
   }),

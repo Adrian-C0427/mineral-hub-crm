@@ -5,7 +5,7 @@ import { Spinner, showToast, Modal, OverflowMenu } from "./ui";
 import { Avatar } from "./kit";
 import { UserAvatar } from "./UserAvatar";
 import { Select } from "./Select";
-import { acres, fmtDate, daysBetween } from "../lib/format";
+import { acres, fmtDate, daysBetween, personName } from "../lib/format";
 import { roundTo } from "../lib/money";
 import { useAuth } from "../auth/AuthContext";
 import { stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
@@ -659,7 +659,7 @@ export function ConvertOpportunityModal({ opp, pipeline, pipelines, onClose, onC
   const target = dealPipelines.find((p) => p.id === targetId) ?? preset;
   const firstStage = target?.stages.find((s) => !s.isTerminal)?.label ?? "its first stage";
   const seller = opp.contact
-    ? [opp.contact.firstName, opp.contact.lastName].filter(Boolean).join(" ") + (opp.contact.entityName ? ` · ${opp.contact.entityName}` : "")
+    ? personName(opp.contact) + (opp.contact.entityName ? ` · ${opp.contact.entityName}` : "")
     : oppSellerLine(opp);
   const place = [opp.county, opp.state].filter(Boolean).join(", ");
   const property = place || opp.abstract || opp.survey

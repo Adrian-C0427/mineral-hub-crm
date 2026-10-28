@@ -42,7 +42,7 @@ const ACT = ["boolean", ["feature-state", "active"], false] as unknown as Expr;
 const OWN = ["boolean", ["feature-state", "owned"], false] as unknown as Expr;
 // Opportunities layer (main map only): the abstract a prospect sits on.
 const OPP = ["boolean", ["feature-state", "opp"], false];
-/** Opportunity marker + tint colour (teal — distinct from deals red, assets violet, selection amber). */
+/** Opportunity abstract tint (teal — distinct from deals red, assets violet, selection amber). */
 export const OPP_COLOR = "#0d9488";
 
 /**

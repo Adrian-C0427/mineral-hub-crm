@@ -10,6 +10,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
 import { syncAskToAcceptedOffer, ASK_SYNCED_EVENT } from "../services/acceptedOfferSync.js";
 import { CONTACT_EDIT_FORBIDDEN, contactPatchFromSellerPatch, contactSyncFor, dealSellerFromInfo, fillContactGeography, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
+import { contactName } from "../domain/contactName.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
@@ -629,7 +630,7 @@ function serializeSeller(
   s = overlayContact(s, s.contact, viewContacts);
   return {
     id: s.id, isPrimary: s.isPrimary, ownershipPercent: s.ownershipPercent,
-    contact: s.contact ? { id: s.contact.id, name: `${s.contact.firstName} ${s.contact.lastName}`.trim() || s.contact.entityName || "Contact" } : null,
+    contact: s.contact ? { id: s.contact.id, name: contactName(s.contact) || "Contact" } : null,
     firstName: s.firstName, middleName: s.middleName, lastName: s.lastName,
     companyName: s.companyName, trustName: s.trustName, sellerType: s.sellerType,
     primaryPhone: s.primaryPhone, secondaryPhone: s.secondaryPhone, email: s.email, preferredContactMethod: s.preferredContactMethod,
@@ -1508,7 +1509,7 @@ dealsRouter.post(
       // contact, else create one — so the same person on two deals is one record.
       const info = sellerInfoSchema.parse({
         contactId: contactId ?? null, sellerType: cols.sellerType,
-        firstName: cols.firstName, lastName: cols.lastName, companyName: cols.companyName ?? cols.trustName,
+        firstName: cols.firstName, middleName: cols.middleName, lastName: cols.lastName, companyName: cols.companyName ?? cols.trustName,
         phone: cols.primaryPhone, email: cols.email,
         mailingAddress: cols.mailingAddress, mailingCity: cols.mailingCity, mailingState: cols.mailingState, mailingZip: cols.mailingZip,
       });
@@ -1519,7 +1520,7 @@ dealsRouter.post(
           ...fromContact,
           ...(cols as object),
           // A seller typed without a name takes the linked contact's.
-          firstName: cols.firstName ?? fromContact.firstName, lastName: cols.lastName ?? fromContact.lastName,
+          firstName: cols.firstName ?? fromContact.firstName, middleName: cols.middleName ?? fromContact.middleName, lastName: cols.lastName ?? fromContact.lastName,
           companyName: cols.companyName ?? fromContact.companyName, primaryPhone: cols.primaryPhone ?? fromContact.primaryPhone, email: cols.email ?? fromContact.email,
           contactId: contact.id, dealId, isPrimary: (data.isPrimary as boolean) ?? count === 0,
         },

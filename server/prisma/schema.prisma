@@ -1679,6 +1679,7 @@ model Contact {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   firstName  String
+  middleName String? // optional; shown between the first and last name
   lastName   String
   entityName String? // company / trust the person represents, if any
 

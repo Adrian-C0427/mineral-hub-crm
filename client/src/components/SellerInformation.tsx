@@ -16,7 +16,7 @@ import type { SellerType } from "../types";
  * Contact: pick an existing one (search by name, company, phone or email) or
  * describe a new one; the server links the contact to the record it creates,
  * reusing an existing contact with the same email / phone + name rather than
- * duplicating it. An individual shows first/last name; an entity (trust, LLC,
+ * duplicating it. An individual shows first/middle/last name; an entity (trust, LLC,
  * estate…) shows the entity name and type, with an optional contact person.
  * The block's values go out as the API's `seller` object (sellerInfoBody).
  */
@@ -34,6 +34,8 @@ export interface SellerInfoForm {
   /** Entity type when `kind` is ENTITY. */
   entityType: SellerType;
   firstName: string;
+  /** Optional; shown between the first and last name. */
+  middleName: string;
   lastName: string;
   companyName: string;
   /** Canonical digits (PhoneInput). */
@@ -46,13 +48,13 @@ export interface SellerInfoForm {
 }
 
 export const emptySellerInfo = (): SellerInfoForm => ({
-  contactId: "", kind: "INDIVIDUAL", entityType: "TRUST", firstName: "", lastName: "", companyName: "", phone: "", email: "",
+  contactId: "", kind: "INDIVIDUAL", entityType: "TRUST", firstName: "", middleName: "", lastName: "", companyName: "", phone: "", email: "",
   mailingAddress: "", mailingCity: "", mailingState: "", mailingZip: "",
 });
 
 /** True when nothing has been entered or picked. */
 export function sellerInfoBlank(f: SellerInfoForm): boolean {
-  return !f.contactId && !f.firstName.trim() && !f.lastName.trim() && !f.companyName.trim() && !f.phone && !f.email.trim()
+  return !f.contactId && !f.firstName.trim() && !f.middleName.trim() && !f.lastName.trim() && !f.companyName.trim() && !f.phone && !f.email.trim()
     && !f.mailingAddress.trim() && !f.mailingCity.trim() && !f.mailingState && !f.mailingZip.trim();
 }
 
@@ -80,7 +82,7 @@ export function sellerInfoBody(f: SellerInfoForm): Record<string, string | null>
   return {
     contactId: f.contactId || null,
     sellerType: entity ? f.entityType : "INDIVIDUAL",
-    firstName: t(f.firstName), lastName: t(f.lastName),
+    firstName: t(f.firstName), middleName: t(f.middleName), lastName: t(f.lastName),
     companyName: entity ? t(f.companyName) : null,
     phone: f.phone || null, email: t(f.email),
     mailingAddress: t(f.mailingAddress), mailingCity: t(f.mailingCity), mailingState: f.mailingState || null, mailingZip: t(f.mailingZip),
@@ -88,11 +90,11 @@ export function sellerInfoBody(f: SellerInfoForm): Record<string, string | null>
 }
 
 /** Form values seeded from a contact (edit flows); blanks where the contact has none. */
-export function sellerInfoFromContact(c: Pick<ContactRow, "id" | "firstName" | "lastName" | "entityName" | "phone" | "email" | "mailingStreet" | "mailingCity" | "mailingState" | "mailingZip">, kind?: SellerKind): SellerInfoForm {
+export function sellerInfoFromContact(c: Pick<ContactRow, "id" | "firstName" | "middleName" | "lastName" | "entityName" | "phone" | "email" | "mailingStreet" | "mailingCity" | "mailingState" | "mailingZip">, kind?: SellerKind): SellerInfoForm {
   const entityOnly = !!c.entityName && (!c.lastName || c.firstName === c.entityName);
   return {
     contactId: c.id, kind: kind ?? (entityOnly ? "ENTITY" : "INDIVIDUAL"), entityType: "TRUST",
-    firstName: entityOnly && c.firstName === c.entityName ? "" : c.firstName ?? "", lastName: c.lastName ?? "", companyName: c.entityName ?? "",
+    firstName: entityOnly && c.firstName === c.entityName ? "" : c.firstName ?? "", middleName: c.middleName ?? "", lastName: c.lastName ?? "", companyName: c.entityName ?? "",
     phone: normalizePhone(c.phone ?? ""), email: c.email ?? "",
     mailingAddress: c.mailingStreet ?? "", mailingCity: c.mailingCity ?? "", mailingState: c.mailingState ?? "", mailingZip: c.mailingZip ?? "",
   };
@@ -159,7 +161,7 @@ export function SellerInformation({ value: f, onChange, req, autoFocus, compact 
     const seed = sellerInfoFromContact(c, f.kind === "ENTITY" || (!c.lastName && !!c.entityName) ? "ENTITY" : "INDIVIDUAL");
     onChange({
       ...f, contactId: c.id, kind: seed.kind,
-      firstName: f.firstName || seed.firstName, lastName: f.lastName || seed.lastName, companyName: f.companyName || seed.companyName,
+      firstName: f.firstName || seed.firstName, middleName: f.middleName || seed.middleName, lastName: f.lastName || seed.lastName, companyName: f.companyName || seed.companyName,
       phone: f.phone || seed.phone, email: f.email || seed.email,
       mailingAddress: f.mailingAddress || seed.mailingAddress, mailingCity: f.mailingCity || seed.mailingCity,
       mailingState: f.mailingState || seed.mailingState, mailingZip: f.mailingZip || seed.mailingZip,
@@ -191,11 +193,13 @@ export function SellerInformation({ value: f, onChange, req, autoFocus, compact 
               <Select value={f.entityType} onChange={(v) => onChange({ ...f, entityType: v as SellerType })} ariaLabel="Entity type" options={ENTITY_TYPES} />
             </div>
             <div className="field"><label>Contact first name</label><input value={f.firstName} onChange={setText("firstName")} placeholder="Trustee, manager… (optional)" aria-label="Contact first name" /></div>
+            <div className="field"><label>Contact middle name</label><input value={f.middleName} onChange={setText("middleName")} placeholder="Optional" aria-label="Contact middle name" /></div>
             <div className="field"><label>Contact last name</label><input value={f.lastName} onChange={setText("lastName")} aria-label="Contact last name" /></div>
           </>
         ) : (
           <>
             <div className="field"><label>First name {req}</label><input value={f.firstName} onChange={setText("firstName")} autoFocus={autoFocus} aria-label="Seller first name" /></div>
+            <div className="field"><label>Middle name</label><input value={f.middleName} onChange={setText("middleName")} placeholder="Optional" aria-label="Seller middle name" /></div>
             <div className="field"><label>Last name {req}</label><input value={f.lastName} onChange={setText("lastName")} aria-label="Seller last name" /></div>
           </>
         )}

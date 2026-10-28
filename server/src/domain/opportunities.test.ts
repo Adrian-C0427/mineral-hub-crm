@@ -107,14 +107,14 @@ describe("convertedDealNotes", () => {
 
 describe("convertedSeller", () => {
   const contact: ConvertibleContact = {
-    firstName: "Mary", lastName: "Smith", entityName: "Smith Family Trust",
+    firstName: "Mary", middleName: "Ann", lastName: "Smith", entityName: "Smith Family Trust",
     phone: "(903) 555-0101", email: "mary@example.com", preferredContact: "CALL",
     mailingStreet: "1 Main St", mailingCity: "Centerville", mailingState: "TX", mailingZip: "75833",
   };
-  it("builds the primary seller from the linked contact", () => {
+  it("builds the primary seller from the linked contact (middle name included)", () => {
     expect(convertedSeller(opp({ sellerName: "ignored" }), contact)).toEqual({
       isPrimary: true,
-      firstName: "Mary", lastName: "Smith", companyName: "Smith Family Trust",
+      firstName: "Mary", middleName: "Ann", lastName: "Smith", companyName: "Smith Family Trust",
       primaryPhone: "9035550101", email: "mary@example.com", preferredContactMethod: "Phone",
       mailingAddress: "1 Main St", mailingCity: "Centerville", mailingState: "TX", mailingZip: "75833",
     });

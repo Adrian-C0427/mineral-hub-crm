@@ -269,7 +269,7 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
             onClear={() => setF((p) => ({ ...p, contactId: "" }))}
             onPick={(c) => setF((p) => ({
               ...p, contactId: c.id,
-              firstName: p.firstName || (c.firstName === c.entityName ? "" : c.firstName), lastName: p.lastName || c.lastName,
+              firstName: p.firstName || (c.firstName === c.entityName ? "" : c.firstName), middleName: p.middleName || (c.middleName ?? ""), lastName: p.lastName || c.lastName,
               companyName: p.companyName || (c.entityName ?? ""), primaryPhone: p.primaryPhone || normalizePhone(c.phone ?? ""), email: p.email || (c.email ?? ""),
               mailingAddress: p.mailingAddress || (c.mailingStreet ?? ""), mailingCity: p.mailingCity || (c.mailingCity ?? ""),
               mailingState: p.mailingState || (c.mailingState ?? ""), mailingZip: p.mailingZip || (c.mailingZip ?? ""),

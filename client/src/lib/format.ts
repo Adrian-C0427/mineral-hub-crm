@@ -131,3 +131,9 @@ export function prettyDocType(v: string): string {
     })
     .join(" ");
 }
+
+/** A person's name as the app shows it: first, middle and last name in that
+ *  order, blanks skipped ("Mary Ann Hernandez"; "" when nothing is filled in). */
+export function personName(p: { firstName?: string | null; middleName?: string | null; lastName?: string | null }): string {
+  return [p.firstName, p.middleName, p.lastName].map((v) => (v ?? "").trim()).filter(Boolean).join(" ");
+}

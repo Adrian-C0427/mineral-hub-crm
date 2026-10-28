@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { normalizePhone } from "./phone.js";
+import { personName } from "./contactName.js";
 
 /**
  * Seller information ↔ Contact.
@@ -34,6 +35,8 @@ export const sellerInfoSchema = z
     contactId: z.string().max(200).nullish().transform((v) => (v ? v : null)),
     sellerType: z.enum(SELLER_TYPES).optional(),
     firstName: text(120),
+    /** Optional; shown between the first and last name. */
+    middleName: text(120),
     lastName: text(120),
     /** Company / entity name (trust, LLC, estate…). */
     companyName: text(200),
@@ -56,6 +59,7 @@ export type SellerInfo = z.infer<typeof sellerInfoSchema>;
 export interface SellerContactRow {
   id: string;
   firstName: string;
+  middleName: string | null;
   lastName: string;
   entityName: string | null;
   phone: string | null;
@@ -70,7 +74,7 @@ export interface SellerContactRow {
   counties?: string[];
 }
 export const sellerContactSelect = {
-  id: true, firstName: true, lastName: true, entityName: true, phone: true, email: true, preferredContact: true,
+  id: true, firstName: true, middleName: true, lastName: true, entityName: true, phone: true, email: true, preferredContact: true,
   mailingStreet: true, mailingCity: true, mailingState: true, mailingZip: true, states: true, counties: true,
 } as const;
 
@@ -103,17 +107,22 @@ export const CONTACT_EDIT_FORBIDDEN = "Changing this seller's contact details ne
 
 const lower =(v: string | null | undefined) => (v ?? "").trim().toLowerCase();
 const same = (a: string | null | undefined, b: string | null | undefined) => lower(a) === lower(b);
+/** Middle names agree unless both are given and differ ("Mary Hernandez" is
+ *  the same name as "Mary Ann Hernandez"; "Mary Ann" and "Mary Jo" are not). */
+const sameMiddle = (a: string | null | undefined, b: string | null | undefined) => !lower(a) || !lower(b) || same(a, b);
 
 /** An entity-only contact is filed under its entity name (firstName = entity,
  *  no last name): its person-name fields read as blank. */
-export function contactPersonName(c: Pick<SellerContactRow, "firstName" | "lastName" | "entityName">): { firstName: string | null; lastName: string | null } {
+export function contactPersonName(c: Pick<SellerContactRow, "firstName" | "lastName" | "entityName"> & { middleName?: string | null }): { firstName: string | null; middleName: string | null; lastName: string | null } {
   const entityOnly = !!c.entityName && !c.lastName && c.firstName === c.entityName;
-  return entityOnly ? { firstName: null, lastName: null } : { firstName: c.firstName || null, lastName: c.lastName || null };
+  return entityOnly
+    ? { firstName: null, middleName: null, lastName: null }
+    : { firstName: c.firstName || null, middleName: c.middleName || null, lastName: c.lastName || null };
 }
 
-/** "Mary Hernandez" — the person's name, else the entity, else "". */
-export function sellerInfoName(s: Pick<SellerInfo, "firstName" | "lastName" | "companyName">): string {
-  return [s.firstName, s.lastName].filter(Boolean).join(" ") || s.companyName || "";
+/** "Mary Ann Hernandez" — the person's name, else the entity, else "". */
+export function sellerInfoName(s: Pick<SellerInfo, "firstName" | "lastName" | "companyName"> & { middleName?: string | null }): string {
+  return personName(s) || s.companyName || "";
 }
 
 /**
@@ -124,6 +133,7 @@ export function sellerInfoName(s: Pick<SellerInfo, "firstName" | "lastName" | "c
  *      entity name, else the most recently updated);
  *   3. with neither an email nor a phone given: the same person name AND the
  *      same entity name (none on both sides counts as the same).
+ * A middle name only tells two names apart when both sides give one.
  * A match on name alone with contact details present is NOT taken — two
  * different John Smiths must not be merged because one has an email.
  */
@@ -137,7 +147,7 @@ export async function matchSellerContact(tx: Tx, organizationId: string, s: Sell
   }
   const hasName = !!(s.firstName || s.lastName);
   const sameName = (c: SellerContactRow) =>
-    (hasName && same(c.firstName, s.firstName) && same(c.lastName, s.lastName)) || (!!s.companyName && same(c.entityName, s.companyName));
+    (hasName && same(c.firstName, s.firstName) && sameMiddle(c.middleName, s.middleName) && same(c.lastName, s.lastName)) || (!!s.companyName && same(c.entityName, s.companyName));
   if (s.phone) {
     // Stored phones are digits, but older rows may carry formatting: match on
     // the last 10 digits, then confirm with the full normalization.
@@ -159,7 +169,7 @@ export async function matchSellerContact(tx: Tx, organizationId: string, s: Sell
   if (s.phone || s.email) return null; // contact details were given and nobody has them: a new contact
   // No contact details at all: the whole name must agree.
   return candidates.find((c) =>
-    same(c.firstName, s.firstName) && same(c.lastName, s.lastName) && same(c.entityName, s.companyName)) ?? null;
+    same(c.firstName, s.firstName) && sameMiddle(c.middleName, s.middleName) && same(c.lastName, s.lastName) && same(c.entityName, s.companyName)) ?? null;
 }
 
 /**
@@ -186,6 +196,9 @@ export async function resolveSellerContact(
     if (opts.manage === false) return { contact: existing, created: false };
     const fill: Prisma.ContactUpdateInput = {};
     if (!existing.entityName && s.companyName) fill.entityName = s.companyName;
+    // A middle name fills in only for the same first + last name (an email or
+    // phone match may name someone else).
+    if (!existing.middleName && s.middleName && s.firstName && same(existing.firstName, s.firstName) && same(existing.lastName, s.lastName)) fill.middleName = s.middleName;
     if (!existing.phone && s.phone) fill.phone = s.phone;
     if (!existing.email && s.email) fill.email = s.email;
     if (!existing.mailingStreet && s.mailingAddress) fill.mailingStreet = s.mailingAddress;
@@ -203,6 +216,7 @@ export async function resolveSellerContact(
     data: {
       organizationId,
       firstName: s.firstName ?? (s.lastName ? "" : s.companyName ?? ""),
+      middleName: s.middleName ?? null,
       lastName: s.lastName ?? "",
       entityName: s.companyName ?? null,
       type: opts.type ?? "SELLER",
@@ -218,6 +232,15 @@ export async function resolveSellerContact(
     select: sellerContactSelect,
   });
   return { contact: created, created: true };
+}
+
+/**
+ * The seller's middle name: when the block names a person, its own (blank =
+ * none, so a cleared middle name stays cleared); a block that only links the
+ * contact takes the contact's.
+ */
+function middleNameFor(s: SellerInfo, person: { middleName: string | null }): string | null {
+  return s.firstName || s.lastName ? s.middleName : s.middleName ?? person.middleName;
 }
 
 /** Contact.preferredContact codes → DealSeller.preferredContactMethod labels. */
@@ -247,6 +270,7 @@ export function dealSellerFromInfo(s: SellerInfo, c: SellerContactRow, view = tr
     isPrimary: true,
     sellerType: s.sellerType ?? (s.companyName || c.entityName ? ("OTHER" as SellerType) : ("INDIVIDUAL" as SellerType)),
     firstName: s.firstName ?? person.firstName,
+    middleName: middleNameFor(s, person),
     lastName: s.lastName ?? person.lastName,
     companyName: s.companyName ?? c.entityName,
     primaryPhone: phone,
@@ -264,7 +288,7 @@ export function dealSellerFromInfo(s: SellerInfo, c: SellerContactRow, view = tr
 export function opportunitySellerFromInfo(s: SellerInfo, c: SellerContactRow, view = true) {
   const d = visibleDetails(c, view);
   const person = contactPersonName(c);
-  const name = [s.firstName ?? person.firstName, s.lastName ?? person.lastName].filter(Boolean).join(" ").trim();
+  const name = personName({ firstName: s.firstName ?? person.firstName, middleName: middleNameFor(s, person), lastName: s.lastName ?? person.lastName });
   return {
     contactId: c.id,
     sellerName: name || null,
@@ -281,12 +305,13 @@ export function opportunitySellerFromInfo(s: SellerInfo, c: SellerContactRow, vi
  * it becomes "".
  */
 export function contactPatchFromSellerPatch(p: {
-  firstName?: string | null; lastName?: string | null; companyName?: string | null;
+  firstName?: string | null; middleName?: string | null; lastName?: string | null; companyName?: string | null;
   primaryPhone?: string | null; email?: string | null;
   mailingAddress?: string | null; mailingCity?: string | null; mailingState?: string | null; mailingZip?: string | null;
 }): Prisma.ContactUpdateInput {
   const out: Prisma.ContactUpdateInput = {};
   if (p.firstName !== undefined) out.firstName = p.firstName ?? "";
+  if (p.middleName !== undefined) out.middleName = p.middleName || null;
   if (p.lastName !== undefined) out.lastName = p.lastName ?? "";
   if (p.companyName !== undefined) out.entityName = p.companyName;
   if (p.primaryPhone !== undefined) out.phone = p.primaryPhone;
@@ -320,7 +345,7 @@ function comparable(key: string, v: unknown): string {
 export function contactSyncFor(access: ContactAccess, patch: Prisma.ContactUpdateInput, c: SellerContactRow): Prisma.ContactUpdateInput | null {
   const person = contactPersonName(c);
   const current: Record<string, string | null> = {
-    firstName: person.firstName, lastName: person.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
+    firstName: person.firstName, middleName: person.middleName, lastName: person.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
     mailingStreet: c.mailingStreet, mailingCity: c.mailingCity, mailingState: c.mailingState, mailingZip: c.mailingZip,
   };
   const changes: Record<string, unknown> = {};
@@ -342,7 +367,7 @@ const pick = <T extends string | null>(c: T | undefined, s: T): T => (c != null 
  * only the names overlay; the contact details shown are the row's own.
  */
 export function overlayContact<S extends {
-  firstName: string | null; lastName: string | null; companyName: string | null;
+  firstName: string | null; middleName?: string | null; lastName: string | null; companyName: string | null;
   primaryPhone: string | null; email: string | null;
   mailingAddress: string | null; mailingCity: string | null; mailingState: string | null; mailingZip: string | null;
 }>(s: S, c: SellerContactRow | null | undefined, view = true): S {
@@ -351,6 +376,7 @@ export function overlayContact<S extends {
   const names = {
     ...s,
     firstName: pick(person.firstName, s.firstName),
+    middleName: pick(person.middleName, s.middleName ?? null),
     lastName: pick(person.lastName, s.lastName),
     companyName: pick(c.entityName, s.companyName),
   };

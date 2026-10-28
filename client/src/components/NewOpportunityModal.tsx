@@ -296,7 +296,7 @@ function sellerSeed(opp: Opp | undefined): SellerInfoForm {
   if (opp.contact) {
     const c = opp.contact;
     return sellerInfoFromContact({
-      id: c.id, firstName: c.firstName, lastName: c.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
+      id: c.id, firstName: c.firstName, middleName: c.middleName ?? null, lastName: c.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
       mailingStreet: c.mailingStreet ?? null, mailingCity: c.mailingCity ?? null, mailingState: c.mailingState ?? null, mailingZip: c.mailingZip ?? null,
     });
   }

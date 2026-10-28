@@ -97,7 +97,7 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
     select: {
       id: true, title: true, body: true, dueDate: true, completedAt: true, organizationId: true,
       assignedToId: true, createdById: true,
-      contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+      contact: { select: { id: true, firstName: true, middleName: true, lastName: true, entityName: true } },
     },
   });
   let tasks = 0;

@@ -1,4 +1,5 @@
 import { userRefSelect, userRef, type UserRef } from "../domain/userRef.js";
+import { contactName } from "../domain/contactName.js";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
@@ -514,13 +515,13 @@ const taskSelect = {
   contactId: true, assignedToId: true, createdById: true,
   assignedTo: { select: userRefSelect },
   createdBy: { select: userRefSelect },
-  contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+  contact: { select: { id: true, firstName: true, middleName: true, lastName: true, entityName: true } },
 } as const;
 type TaskRow = {
   id: string; kind: string; title: string | null; body: string; dueDate: Date | null; priority: string | null; completedAt: Date | null; createdAt: Date;
   contactId: string | null; assignedToId: string | null; createdById: string | null;
   assignedTo: UserRef | null; createdBy: UserRef | null;
-  contact: { id: string; firstName: string | null; lastName: string | null; entityName: string | null } | null;
+  contact: { id: string; firstName: string | null; middleName?: string | null; lastName: string | null; entityName: string | null } | null;
 };
 function serializeTask(t: TaskRow, meId: string, manageAll: boolean) {
   const owner = t.assignedTo ?? t.createdBy;
@@ -539,7 +540,7 @@ function serializeTask(t: TaskRow, meId: string, manageAll: boolean) {
     completedAt: t.completedAt,
     createdAt: t.createdAt,
     contactId: t.contact?.id ?? null,
-    contactName: t.contact ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact" : null,
+    contactName: t.contact ? contactName(t.contact) || "Contact" : null,
     canComplete: mine,
     canEdit: mine,
   };

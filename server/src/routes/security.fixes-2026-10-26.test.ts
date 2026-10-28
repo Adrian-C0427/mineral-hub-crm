@@ -53,7 +53,7 @@ const VIEW_ONLY: Permission[] = [...DEALS, "viewContacts"];
 const MANAGE: Permission[] = [...DEALS, "viewContacts", "manageContacts"];
 
 const contact = (over: Partial<SellerContactRow> = {}): SellerContactRow => ({
-  id: "c1", firstName: "Mary", lastName: "Hernandez", entityName: null, phone: "9035551234", email: "mary@example.com",
+  id: "c1", firstName: "Mary", middleName: null, lastName: "Hernandez", entityName: null, phone: "9035551234", email: "mary@example.com",
   preferredContact: "CALL", mailingStreet: "1 Main St", mailingCity: "Centerville", mailingState: "TX", mailingZip: "75833",
   states: [], counties: [], ...over,
 });

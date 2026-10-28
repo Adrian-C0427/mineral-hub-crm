@@ -20,7 +20,7 @@ import { TaskFormModal, TASK_PRIORITY_META } from "../components/TaskForm";
 import { newTaskValues, type TaskFormValues } from "../lib/tasks";
 import { isAbstractId } from "../lib/opportunityForm";
 import { surveyLabel } from "../lib/abstracts";
-import { acres, fmtDate, fmtDateLocal, fmtDateTime, toInputDate } from "../lib/format";
+import { acres, fmtDate, fmtDateLocal, fmtDateTime, personName, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import type { ContactActivityRow } from "./ContactDetail";
 import type { Opp, OppActivityRow, UserLite, UserRef } from "../types";
@@ -262,7 +262,7 @@ export function OpportunityRecord({ opp, onChange: setOpp, reload: load }: { opp
 
 /** The seller's display name: the linked contact's, else the plain fields. */
 function sellerName(o: Opp): string {
-  if (o.contact) return [o.contact.firstName, o.contact.lastName].filter(Boolean).join(" ") || o.contact.entityName || "";
+  if (o.contact) return personName(o.contact) || o.contact.entityName || "";
   return o.sellerName || o.companyName || "";
 }
 
@@ -513,7 +513,7 @@ function SellerModal({ opp, onClose, onSaved }: { opp: Opp; onClose: () => void;
   const [seller, setSeller] = useState<SellerInfoForm>(() => {
     if (opp.contact) {
       const c = opp.contact;
-      return sellerInfoFromContact({ id: c.id, firstName: c.firstName, lastName: c.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
+      return sellerInfoFromContact({ id: c.id, firstName: c.firstName, middleName: c.middleName ?? null, lastName: c.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
         mailingStreet: c.mailingStreet ?? null, mailingCity: c.mailingCity ?? null, mailingState: c.mailingState ?? null, mailingZip: c.mailingZip ?? null });
     }
     const name = (opp.sellerName ?? "").trim(); const i = name.lastIndexOf(" ");

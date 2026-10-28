@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import {
-  contactPatchFromSellerPatch, dealSellerFromInfo, matchSellerContact, opportunitySellerFromInfo, overlayContact,
-  resolveSellerContact, sellerInfoSchema, type SellerContactRow,
+  contactPatchFromSellerPatch, contactSyncFor, dealSellerFromInfo, matchSellerContact, opportunitySellerFromInfo, overlayContact,
+  resolveSellerContact, SYSTEM_CONTACT_ACCESS, sellerInfoSchema, type SellerContactRow,
 } from "./sellerContact.js";
+import { contactName, personName } from "./contactName.js";
 
 /**
  * The seller block → Contact rules: how an existing contact is recognized
@@ -13,7 +14,7 @@ import {
  */
 
 const contact = (over: Partial<SellerContactRow> = {}): SellerContactRow => ({
-  id: "c1", firstName: "Mary", lastName: "Hernandez", entityName: null, phone: "9035551234", email: "mary@example.com",
+  id: "c1", firstName: "Mary", middleName: null, lastName: "Hernandez", entityName: null, phone: "9035551234", email: "mary@example.com",
   preferredContact: "CALL", mailingStreet: "1 Main St", mailingCity: "Centerville", mailingState: "TX", mailingZip: "75833", ...over,
 });
 
@@ -162,5 +163,59 @@ describe("keeping the contact and the seller row consistent", () => {
     expect(contactPatchFromSellerPatch({ lastName: null, companyName: "New LLC", primaryPhone: "9", trustName: "ignored" } as never))
       .toEqual({ lastName: "", entityName: "New LLC", phone: "9" });
     expect(contactPatchFromSellerPatch({})).toEqual({});
+  });
+});
+
+describe("middle name", () => {
+  it("reads first, middle, last; blanks skipped; an entity when there is no person", () => {
+    expect(personName({ firstName: "Mary", middleName: "Ann", lastName: "Hernandez" })).toBe("Mary Ann Hernandez");
+    expect(personName({ firstName: "Mary", middleName: "  ", lastName: "Hernandez" })).toBe("Mary Hernandez");
+    expect(personName({ firstName: "Mary", middleName: null, lastName: "" })).toBe("Mary");
+    expect(contactName({ firstName: "", lastName: "", entityName: "X LLC" })).toBe("X LLC");
+  });
+  it("is optional in the seller block; a blank is null", () => {
+    expect(info({ firstName: "Mary", lastName: "Hernandez" }).middleName).toBeNull();
+    expect(info({ firstName: "Mary", middleName: " Ann ", lastName: "Hernandez" }).middleName).toBe("Ann");
+    expect(info({ firstName: "Mary", middleName: "  ", lastName: "Hernandez" }).middleName).toBeNull();
+  });
+  it("matching: a middle name tells two names apart only when both sides give one", async () => {
+    const { tx } = fakeTx([contact({ phone: null, email: null })]);
+    expect((await matchSellerContact(tx, "org", info({ firstName: "Mary", middleName: "Ann", lastName: "Hernandez" })))?.id).toBe("c1");
+    const withMiddle = fakeTx([contact({ phone: null, email: null, middleName: "Ann" })]);
+    expect((await matchSellerContact(withMiddle.tx, "org", info({ firstName: "Mary", lastName: "Hernandez" })))?.id).toBe("c1");
+    expect((await matchSellerContact(withMiddle.tx, "org", info({ firstName: "Mary", middleName: "ann", lastName: "Hernandez" })))?.id).toBe("c1");
+    expect(await matchSellerContact(withMiddle.tx, "org", info({ firstName: "Mary", middleName: "Jo", lastName: "Hernandez" }))).toBeNull();
+  });
+  it("a new contact gets the typed middle name", async () => {
+    const { tx, create } = fakeTx([]);
+    await resolveSellerContact(tx, "org", info({ firstName: "Ann", middleName: "Marie", lastName: "Lee" }), { notFound });
+    expect(create.mock.calls[0][0].data).toMatchObject({ firstName: "Ann", middleName: "Marie", lastName: "Lee" });
+  });
+  it("a matched contact gains a missing middle name only for the same first + last name", async () => {
+    const same = fakeTx([contact()]);
+    await resolveSellerContact(same.tx, "org", info({ firstName: "Mary", middleName: "Ann", lastName: "Hernandez", email: "mary@example.com" }), { notFound });
+    expect(same.update.mock.calls[0][0].data).toMatchObject({ middleName: "Ann" });
+    // Matched by email, but the block names someone else: the contact's name is left alone.
+    const other = fakeTx([contact()]);
+    await resolveSellerContact(other.tx, "org", info({ firstName: "Jose", middleName: "Q", lastName: "Hernandez", email: "mary@example.com" }), { notFound });
+    expect(other.update).not.toHaveBeenCalled();
+  });
+  it("seller rows: the block's middle name when it names a person (blank = none), else the contact's", () => {
+    const ann = contact({ middleName: "Ann" });
+    expect(dealSellerFromInfo(info({ firstName: "Mary", middleName: "Jo", lastName: "Hernandez" }), ann).middleName).toBe("Jo");
+    expect(dealSellerFromInfo(info({ firstName: "Mary", lastName: "Hernandez" }), ann).middleName).toBeNull();
+    expect(dealSellerFromInfo(info({ contactId: "c1" }), ann).middleName).toBe("Ann");
+    expect(opportunitySellerFromInfo(info({ contactId: "c1" }), ann).sellerName).toBe("Mary Ann Hernandez");
+    expect(opportunitySellerFromInfo(info({ firstName: "Mary", middleName: "Jo", lastName: "Hernandez" }), ann).sellerName).toBe("Mary Jo Hernandez");
+  });
+  it("edits mirror the middle name onto the contact (a cleared one clears it); the overlay prefers the contact's", () => {
+    expect(contactPatchFromSellerPatch({ middleName: "Ann" })).toEqual({ middleName: "Ann" });
+    expect(contactPatchFromSellerPatch({ middleName: "" })).toEqual({ middleName: null });
+    const c = contact({ middleName: "Ann" });
+    expect(contactSyncFor(SYSTEM_CONTACT_ACCESS, { middleName: "Ann" }, c)).toEqual({});
+    expect(contactSyncFor(SYSTEM_CONTACT_ACCESS, { middleName: null }, c)).toEqual({ middleName: null });
+    const row = { firstName: "Mary", middleName: "Old", lastName: "Hernandez", companyName: null, primaryPhone: null, email: null, mailingAddress: null, mailingCity: null, mailingState: null, mailingZip: null };
+    expect(overlayContact(row, c).middleName).toBe("Ann");
+    expect(overlayContact(row, contact()).middleName).toBe("Old");
   });
 });

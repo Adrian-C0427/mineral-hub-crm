@@ -413,14 +413,16 @@ function Tags({ contact, canManage, onSave }: { contact: ContactRow; canManage: 
  * pipeline, and the outreach cadence. All sections start open — this rail is
  * the at-a-glance dossier — and each can be collapsed individually.
  */
-/** Click-to-edit contact name (first + last saved together, still one action). */
+/** Click-to-edit contact name (first, middle and last saved together, still one action). */
 function NameField({ contact, canEdit, onSave }: { contact: ContactRow; canEdit: boolean; onSave: (body: Record<string, unknown>) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
+  const [middle, setMiddle] = useState("");
   const [last, setLast] = useState("");
   const [busy, setBusy] = useState(false);
-  const dirty = first.trim() !== contact.firstName || last.trim() !== contact.lastName;
+  const dirty = first.trim() !== contact.firstName || middle.trim() !== (contact.middleName ?? "") || last.trim() !== contact.lastName;
   const valid = first.trim() !== "" && last.trim() !== "";
+  const start = () => { setFirst(contact.firstName); setMiddle(contact.middleName ?? ""); setLast(contact.lastName); setEditing(true); };
 
   if (!editing) {
     return (
@@ -428,8 +430,8 @@ function NameField({ contact, canEdit, onSave }: { contact: ContactRow; canEdit:
         className={`cw-name ${canEdit ? "editable" : ""}`}
         role={canEdit ? "button" : undefined} tabIndex={canEdit ? 0 : undefined}
         title={canEdit ? "Edit name" : undefined}
-        onClick={() => { if (canEdit) { setFirst(contact.firstName); setLast(contact.lastName); setEditing(true); } }}
-        onKeyDown={canEdit ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFirst(contact.firstName); setLast(contact.lastName); setEditing(true); } } : undefined}
+        onClick={() => { if (canEdit) start(); }}
+        onKeyDown={canEdit ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); start(); } } : undefined}
       >
         {contact.name}
       </div>
@@ -438,11 +440,13 @@ function NameField({ contact, canEdit, onSave }: { contact: ContactRow; canEdit:
   const save = async () => {
     if (!dirty || !valid || busy) return;
     setBusy(true);
-    try { await onSave({ firstName: first.trim(), lastName: last.trim() }); setEditing(false); } finally { setBusy(false); }
+    try { await onSave({ firstName: first.trim(), middleName: middle.trim() || null, lastName: last.trim() }); setEditing(false); } finally { setBusy(false); }
   };
   return (
     <div className="cw-fedit" style={{ flexWrap: "wrap" }}>
       <input autoFocus value={first} onChange={(e) => setFirst(e.target.value)} placeholder="First" aria-label="First name" style={{ flex: "1 1 90px", minWidth: 0 }}
+        onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEditing(false); }} />
+      <input value={middle} onChange={(e) => setMiddle(e.target.value)} placeholder="Middle" aria-label="Middle name" style={{ flex: "1 1 70px", minWidth: 0 }}
         onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEditing(false); }} />
       <input value={last} onChange={(e) => setLast(e.target.value)} placeholder="Last" aria-label="Last name" style={{ flex: "1 1 90px", minWidth: 0 }}
         onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEditing(false); }} />
@@ -612,6 +616,10 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
         {
           label: "First name", display: contact.firstName,
           edit: { kind: "text", value: contact.firstName, required: true, body: (v) => ({ firstName: v.trim(), lastName: contact.lastName }) },
+        },
+        {
+          label: "Middle name", display: contact.middleName || null,
+          edit: { kind: "text", value: contact.middleName ?? "", placeholder: "Optional", body: (v) => ({ middleName: v.trim() || null }) },
         },
         {
           label: "Last name", display: contact.lastName,
