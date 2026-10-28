@@ -87,8 +87,12 @@ export function isSealed(value: string | null | undefined): boolean {
   return !!value && parse(value) !== null;
 }
 
+/** GCM tag length we always write; a shorter stored tag would be far easier to forge. */
+const AUTH_TAG_BYTES = 16;
+
 function open(p: NonNullable<ReturnType<typeof parse>>, k: SealingKey): string {
-  const decipher = crypto.createDecipheriv("aes-256-gcm", k.key, p.iv);
+  if (p.tag.length !== AUTH_TAG_BYTES) throw new Error("Malformed secret payload");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", k.key, p.iv, { authTagLength: AUTH_TAG_BYTES });
   decipher.setAuthTag(p.tag);
   return Buffer.concat([decipher.update(p.data), decipher.final()]).toString("utf8");
 }
