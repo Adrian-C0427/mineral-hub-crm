@@ -13,14 +13,14 @@
 |---|---|---|---|---|
 | 1 | **Full Wellbore** | ASCII | Weekly (by following Monday) | Master well record: API #, lease #/name, well #, operator, field, county, abstract & survey, spud/completion/plug dates, depth, status, oil/gas code. The backbone every other dataset keys onto (`dbf900` layout). |
 | 2 | **Production Data Query Dump** | CSV | Last Saturday each month | Lease-level monthly oil / casinghead gas / gas-well gas / condensate, Jan 1993–present, with operator and field cross-references. Already powers Leon/Freestone production. |
-| 3 | **Completion Information in Data Format** | ASCII | Nightly | Structured W-2/G-1 completion filings: completion date, formation/reservoir, perforations, casing. Source of formation attribution and completion history. |
+| 3 | **Completion Information in Data Format** | ASCII | Nightly | Structured W-2/G-1 completion filings: completion date, reservoir, perforations, casing. Source of completion history. |
 | 4 | **Drilling Permit Master and Trailer - Daily File (Includes Latitudes and Longitudes)** | ASCII | Nightly | Permit history with coordinates — leading indicator for acquisition targeting (`daf802` layout). Superset of the other permit-file variants. |
 | 5 | **Well Layers by County** | ArcView Shape File | Twice a week | Surface well points **and wellbore/lateral arcs** — the only bulk source of horizontal wellbore geometry (directional surveys are PDF-only). |
 | 6 | **Statewide API Data** | ASCII (dBase also offered) | Twice a week | Attribute table keyed to the map well points (API #, symbol/status, operator); joins shapefiles to well records (`gse10` layout). |
 | 7 | **P5 Organization** | ASCII (EBCDIC also offered) | Monthly (by 25th) | Operator master: P-5 number, name, address, status. Normalizes every operator reference. |
 | 8 | **Oil & Gas Field Name & Numbers** | ASCII | Monthly (by 4th working day) | Field number → name lookup; fields are RRC's reservoir proxy and appear in every well/production record. |
 
-Together these cover: API number, RRC lease number, well/lease names, operator, county, abstract, survey, field, formation (via completions), surface locations, horizontal wellbore geometry, permit history, completion history, well status, spud/completion/plug dates, and full 1993+ oil & gas production history.
+Together these cover: API number, RRC lease number, well/lease names, operator, county, abstract, survey, field, surface locations, horizontal wellbore geometry, permit history, completion history, well status, spud/completion/plug dates, and full 1993+ oil & gas production history.
 
 ## Phase 2 — Recommended
 
@@ -74,11 +74,9 @@ Together these cover: API number, RRC lease number, well/lease names, operator, 
 
 | Gap | Why | Source |
 |---|---|---|
-| Basin attribution | Not an RRC concept | EIA/USGS basin & play shapefiles (free) — spatial join |
 | Well logs | Not published by RRC | TX BEG / University Lands (limited free); TGS, S&P/Enverus (commercial) |
 | Digital directional surveys | PDF images only | Digitize, or commercial; Well Layers arcs are the free approximation |
 | Well-level oil production | Texas reports oil at lease level | Allocation algorithms (we already prorate lease→well for the heat map) |
 | Monthly produced-water volumes | Only test-day rates (W-10/G-10) | B3/Sourcenergy (commercial), or accept test-based |
-| Formation tops / geology | Not collected | BEG, USGS, commercial |
 | Mineral ownership / title | Not RRC jurisdiction | County clerk / appraisal district records, title plants |
 | Pricing beyond posted WTI | Only the ICE file | EIA (free), OPIS/Platts (commercial) |

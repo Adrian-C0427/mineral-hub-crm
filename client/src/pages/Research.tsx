@@ -128,7 +128,7 @@ function InterestCell({ r }: { r: DocRecord }) {
 interface PermitRecord {
   id: string; state: string; county: string; apiNumber: string | null; permitNumber: string | null;
   operator: string; leaseName: string | null; wellName: string | null; status: string; trajectory: string;
-  activityDate: string; formation: string | null; field: string | null; source: string;
+  activityDate: string; field: string | null; source: string;
 }
 interface Paged<T> { total: number; page: number; pageSize: number; rows: T[] }
 // Platform RRC W-1 permits (rrc.permits) — read-only public-record rows,
@@ -2266,8 +2266,8 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         let rows = await fetchAllRows<PermitRecord>("permits");
         if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
         downloadCsv(onlySelected ? "research-permits-selected.csv" : "research-permits.csv",
-          ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Formation", "Source"],
-          rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.formation, r.source]));
+          ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Source"],
+          rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.source]));
       }
     } finally { setExporting(false); }
   }
@@ -2297,7 +2297,6 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "status", header: "Status", value: (r) => r.status, render: (r) => <EnumTag value={r.status} /> },
     { key: "trajectory", header: "Trajectory", value: (r) => r.trajectory, render: (r) => <EnumTag value={r.trajectory} /> },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, {r.state}</span> },
-    { key: "formation", header: "Formation", value: (r) => r.formation },
     { key: "apiNumber", header: "API #", value: (r) => r.apiNumber, align: "right", render: (r) => r.apiNumber ? <span className="rs-mono rec-nowrap">{r.apiNumber}</span> : dash },
   ];
 

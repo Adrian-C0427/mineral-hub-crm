@@ -38,7 +38,7 @@ export function isInboundEmailProvider(key: string): boolean {
   return key === "outlook";
 }
 
-/** "Riley Cole <riley@basinpeak.com>" → "riley@basinpeak.com" (lowercased). */
+/** "Riley Cole <riley@summitpeak.com>" → "riley@summitpeak.com" (lowercased). */
 export function parseFromAddress(raw: string): string | null {
   const angle = raw.match(/<([^<>\s]+@[^<>\s]+)>/);
   const bare = angle?.[1] ?? raw.match(/([^\s<>,;"']+@[^\s<>,;"']+)/)?.[1];

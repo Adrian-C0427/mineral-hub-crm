@@ -23,7 +23,7 @@ describe("escapeLike", () => {
   });
 
   it("leaves ordinary search terms untouched", () => {
-    expect(escapeLike("PERMIAN BASIN")).toBe("PERMIAN BASIN");
+    expect(escapeLike("SMITH RANCH UNIT")).toBe("SMITH RANCH UNIT");
     expect(escapeLike("42-123-45678")).toBe("42-123-45678");
     expect(escapeLike("O'BRIEN #1H")).toBe("O'BRIEN #1H");
   });

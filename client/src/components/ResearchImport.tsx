@@ -44,8 +44,8 @@ const LEASE_TEMPLATE = {
   rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "Leon", "289183", "T RAGSDALE"]],
 };
 const PERMIT_TEMPLATE = {
-  headers: ["Operator Name", "County", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date", "Formation"],
-  rows: [["Apex Energy Partners LP", "Leon", "42-289-40012", "889321", "HALLMARK UNIT", "1H", "Approved", "Horizontal", "03/02/2026", "03/20/2026", "", "Eagle Ford"]],
+  headers: ["Operator Name", "County", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date"],
+  rows: [["Apex Energy Partners LP", "Leon", "42-289-40012", "889321", "HALLMARK UNIT", "1H", "Approved", "Horizontal", "03/02/2026", "03/20/2026", ""]],
 };
 
 /** Import-history "Type" label from the stored source tag. */
@@ -332,7 +332,7 @@ const DOC_COLS: [string, string][] = [
 ];
 const PERMIT_COLS: [string, string][] = [
   ["operator", "Operator"], ["apiNumber", "API"], ["permitNumber", "Permit"], ["leaseName", "Lease"], ["wellName", "Well"],
-  ["status", "Status"], ["filedDate", "Filed"], ["approvedDate", "Approved"], ["county", "County"], ["state", "St"], ["formation", "Formation"],
+  ["status", "Status"], ["filedDate", "Filed"], ["approvedDate", "Approved"], ["county", "County"], ["state", "St"],
 ];
 
 function ImportReview({ runId }: { runId: string }) {

@@ -40,14 +40,14 @@ const SEED_DEALS: DemoDeal[] = [
   { id: "d3", name: "Caldwell Royalty", county: "Robertson", stage: "PREPARING_PACKAGE", nra: 210, profit: 118000, days: 4 },
   { id: "d4", name: "Hargrove NPRI", county: "Leon", stage: "SENT_TO_BUYERS", nra: 64, profit: 32000, days: 9 },
   { id: "d5", name: "Twin Oaks ORRI", county: "Midland", stage: "SENT_TO_BUYERS", nra: 175, profit: 96000, days: 11 },
-  { id: "d6", name: "Prewitt Estate", county: "Freestone", stage: "NEGOTIATING", nra: 120, profit: 67000, buyer: "Basin Peak Minerals", days: 7 },
+  { id: "d6", name: "Prewitt Estate", county: "Freestone", stage: "NEGOTIATING", nra: 120, profit: 67000, buyer: "Summit Peak Minerals", days: 7 },
   { id: "d7", name: "Salt Creek RI", county: "Reeves", stage: "CLOSING", nra: 240, profit: 155000, buyer: "Stag Royalty Partners", days: 12 },
 ];
 
 interface DemoBuyer { name: string; counties: string[]; types: string[]; minNra: number | null; closed: number }
 const SAMPLE_BUYERS: DemoBuyer[] = [
   { name: "Stag Royalty Partners", counties: ["Leon", "Freestone", "Robertson"], types: ["RI", "NPRI", "MI"], minNra: 50, closed: 6 },
-  { name: "Basin Peak Minerals", counties: ["Leon", "Midland", "Reeves"], types: ["RI", "ORRI"], minNra: 100, closed: 4 },
+  { name: "Summit Peak Minerals", counties: ["Leon", "Midland", "Reeves"], types: ["RI", "ORRI"], minNra: 100, closed: 4 },
   { name: "Brazos Verde Capital", counties: ["Robertson", "Freestone"], types: ["NPRI", "MI"], minNra: null, closed: 2 },
   { name: "Llano Uplift Holdings", counties: ["Midland", "Reeves"], types: ["WI", "ORRI"], minNra: 150, closed: 3 },
   { name: "Pine Prairie Royalty", counties: ["Leon"], types: ["RI", "ORRI", "NPRI"], minNra: 25, closed: 1 },
@@ -71,8 +71,8 @@ export function Landing() {
   // Recent-activity feed for the hero dashboard; pipeline drags prepend to it.
   const [events, setEvents] = useState<{ text: string; when: string }[]>([
     { text: "Morgan emailed \"Twin Oaks ORRI\" to 4 buyers", when: "2h ago" },
-    { text: "Offer received — Basin Peak Minerals · $310,000", when: "5h ago" },
-    { text: "Portal lead: Riley Cole (Basin Peak Minerals)", when: "1d ago" },
+    { text: "Offer received — Summit Peak Minerals · $310,000", when: "5h ago" },
+    { text: "Portal lead: Riley Cole (Summit Peak Minerals)", when: "1d ago" },
   ]);
   const logMove = (deal: string, stage: string) =>
     setEvents((p) => [{ text: `You moved "${deal}" to ${stage}`, when: "just now" }, ...p].slice(0, 4));
@@ -178,11 +178,11 @@ function Nav() {
 
 const TOP_BUYERS = [
   { name: "Stag Royalty Partners", volume: 468000 },
-  { name: "Basin Peak Minerals", volume: 291000 },
+  { name: "Summit Peak Minerals", volume: 291000 },
   { name: "Llano Uplift Holdings", volume: 133000 },
 ];
 const FOLLOW_UPS = [
-  { buyer: "Basin Peak Minerals", deal: "Prewitt Estate", when: "Tomorrow" },
+  { buyer: "Summit Peak Minerals", deal: "Prewitt Estate", when: "Tomorrow" },
   { buyer: "Brazos Verde Capital", deal: "Hargrove NPRI", when: "Jul 10" },
   { buyer: "Pine Prairie Royalty", deal: "Barnes A-537", when: "Jul 14" },
 ];

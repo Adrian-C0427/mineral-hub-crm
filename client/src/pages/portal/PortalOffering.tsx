@@ -89,8 +89,6 @@ export function PortalOffering() {
   const facts: { k: string; v: string }[] = [
     { k: deal.states.length > 1 ? "States" : "State", v: deal.states.join(", ") },
     { k: deal.counties.length > 1 ? "Counties" : "County", v: deal.counties.join(", ") },
-    { k: deal.basins.length > 1 ? "Basins" : "Basin", v: deal.basins.join(", ") },
-    { k: deal.formations.length > 1 ? "Formations" : "Formation", v: deal.formations.join(", ") },
     { k: "Producing status", v: deal.producingStatus ?? "" },
     { k: surveys.length > 1 ? "Surveys" : "Survey", v: surveys.join(", ") },
     { k: "Operator", v: deal.operator ?? "" },
@@ -143,7 +141,7 @@ export function PortalOffering() {
                     <span className="pp-abs-badge">{firstAbsNo ? `A-${firstAbsNo}` : "A"}</span>
                     <div className="pp-absstrip-text">
                       <span className="pp-absstrip-name">{formatAbstract({ abstract: firstAbsNo || firstAbs.id, survey: firstAbs.survey })}{abstracts.length > 1 ? ` +${abstracts.length - 1} more` : ""}</span>
-                      <span className="pp-absstrip-sub">{[countyStateLabel(firstAbs.county, firstAbs.state ?? "TX"), deal.basins.join(", ")].filter(Boolean).join(" · ")}</span>
+                      <span className="pp-absstrip-sub">{countyStateLabel(firstAbs.county, firstAbs.state ?? "TX")}</span>
                     </div>
                   </div>
                   <button type="button" className="pp-btn sm" onClick={() => mapApi.current?.recenter()}>

@@ -1,9 +1,9 @@
 /**
  * Matching engine. Compares a deal against a buyer's buy-box criterion by
- * criterion, weighted to 100 total. Computed LIVE on every request — never cached.
+ * criterion, each with a relative weight; the percentage is the matched weight
+ * over the total. Computed LIVE on every request — never cached.
  *
- *   State 20, County 20, Basin 20, Formation 20, Asset Type 10,
- *   Acreage range 5, Price range 5
+ *   State 20, County 20, Asset Type 10, Acreage range 5, Price range 5
  *
  * Scoring is deliberately selective so percentages differentiate buyers
  * instead of clustering at 100:
@@ -21,14 +21,12 @@
 export const MATCH_WEIGHTS = {
   state: 20,
   county: 20,
-  basin: 20,
-  formation: 20,
   assetType: 10,
   acreage: 5,
   price: 5,
 } as const;
 
-export const MATCH_TOTAL_WEIGHT = Object.values(MATCH_WEIGHTS).reduce((a, b) => a + b, 0); // 100
+export const MATCH_TOTAL_WEIGHT = Object.values(MATCH_WEIGHTS).reduce((a, b) => a + b, 0); // 60
 
 /** Credit multiplier for unspecified ("accepts any") criteria. */
 export const ANY_CREDIT = 0.25;
@@ -36,8 +34,6 @@ export const ANY_CREDIT = 0.25;
 export interface DealForMatch {
   state: string | null;
   counties: string[];
-  basins: string[];
-  formations: string[];
   assetTypes: string[];
   acreageNma: number | null;
   askPrice: number | null;
@@ -46,8 +42,6 @@ export interface DealForMatch {
 export interface BuyBoxForMatch {
   states: string[];
   counties: string[];
-  basins: string[];
-  formations: string[];
   assetTypes: string[];
   minAcreage: number | null;
   maxAcreage: number | null;
@@ -72,7 +66,7 @@ export interface MatchResult {
   criteria: CriterionResult[];
   matching: CriterionResult[];
   nonMatching: CriterionResult[];
-  /** How many criteria the buyer's box actually specifies (0–7). A high
+  /** How many criteria the buyer's box actually specifies (0–5). A high
    *  matchPercent against a sparse box is weak evidence — the UI shows this
    *  count so "100%" can't masquerade as a thoroughly-vetted fit. */
   criteriaSpecified: number;
@@ -135,8 +129,6 @@ export function computeMatch(deal: DealForMatch, box: BuyBoxForMatch): MatchResu
 
   push("state", "State", box.states.length > 0, setMatch(deal.state, box.states));
   push("county", "County", box.counties.length > 0, multiMatch(deal.counties, box.counties));
-  push("basin", "Basin", box.basins.length > 0, multiMatch(deal.basins, box.basins));
-  push("formation", "Formation", box.formations.length > 0, multiMatch(deal.formations, box.formations));
   push("assetType", "Asset Type", box.assetTypes.length > 0, multiMatch(deal.assetTypes, box.assetTypes));
   push("acreage", "Acreage", box.minAcreage != null || box.maxAcreage != null, rangeMatch(deal.acreageNma, box.minAcreage, box.maxAcreage));
   push("price", "Price", box.minPrice != null || box.maxPrice != null, rangeMatch(deal.askPrice, box.minPrice, box.maxPrice));

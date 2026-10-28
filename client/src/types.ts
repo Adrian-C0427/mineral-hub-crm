@@ -45,8 +45,6 @@ export interface DealSummary {
   /** Accepted offer, else best offer (the basis of profitEst); null = no offers. */
   buyerPurchasePrice?: number | null;
   assetTypes: string[];
-  basins: string[];
-  formations: string[];
   stage: Stage;
   publishedToPortal?: boolean;
   portalSlug?: string | null;
@@ -149,7 +147,7 @@ export interface RevenueEntry {
 }
 
 export interface BuyBox {
-  states: string[]; counties: string[]; basins: string[]; formations: string[]; assetTypes: string[];
+  states: string[]; counties: string[]; assetTypes: string[];
   minAcreage: number | null; maxAcreage: number | null; minPrice: number | null; maxPrice: number | null;
 }
 
@@ -253,8 +251,6 @@ export interface OppSummary {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
-  basins: string[];
-  formations: string[];
   source: string | null;
   lastActivityAt: string | null;
   /** Calendar day at UTC midnight (same convention as task due dates). */

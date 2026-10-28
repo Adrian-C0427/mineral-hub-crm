@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { acres, money, num } from "../../lib/format";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../../lib/options";
+import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../../lib/options";
 import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
 import { Select } from "../../components/Select";
 import { GeoFields } from "../../components/GeoFields";
@@ -36,7 +36,7 @@ type DockSide = "left" | "right";
 // server.
 interface FilterSnapshot {
   q: string;
-  states: string[]; counties: string[]; basins: string[]; formations: string[];
+  states: string[]; counties: string[];
   assetTypes: string[]; operators: string[]; nraMin: string; nraMax: string; sort: SortKey;
 }
 interface SavedSearch { name: string; f: FilterSnapshot }
@@ -80,8 +80,6 @@ export function PortalMarketplace() {
   const [q, setQ] = useState("");
   const [fStates, setFStates] = useState<string[]>([]);
   const [fCounties, setFCounties] = useState<string[]>([]);
-  const [fBasins, setFBasins] = useState<string[]>([]);
-  const [fFormations, setFFormations] = useState<string[]>([]);
   const [fAssetTypes, setFAssetTypes] = useState<string[]>([]);
   const [fOperators, setFOperators] = useState<string[]>([]);
   const [nraMin, setNraMin] = useState("");
@@ -100,18 +98,18 @@ export function PortalMarketplace() {
   const [phoneMap, setPhoneMap] = useState(false);
 
   const snapshot = useMemo<FilterSnapshot>(() => ({
-    q, states: fStates, counties: fCounties, basins: fBasins, formations: fFormations,
+    q, states: fStates, counties: fCounties,
     assetTypes: fAssetTypes, operators: fOperators, nraMin, nraMax, sort,
-  }), [q, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
+  }), [q, fStates, fCounties, fAssetTypes, fOperators, nraMin, nraMax, sort]);
 
   function applySnapshot(f: Partial<FilterSnapshot>) {
     setQ(f.q ?? "");
-    setFStates(f.states ?? []); setFCounties(f.counties ?? []); setFBasins(f.basins ?? []);
-    setFFormations(f.formations ?? []); setFAssetTypes(f.assetTypes ?? []); setFOperators(f.operators ?? []);
+    setFStates(f.states ?? []); setFCounties(f.counties ?? []);
+    setFAssetTypes(f.assetTypes ?? []); setFOperators(f.operators ?? []);
     setNraMin(f.nraMin ?? ""); setNraMax(f.nraMax ?? ""); setSort(f.sort ?? "featured");
   }
   const activeFilterCount =
-    fStates.length + fCounties.length + fBasins.length + fFormations.length +
+    fStates.length + fCounties.length +
     fAssetTypes.length + fOperators.length + (nraMin ? 1 : 0) + (nraMax ? 1 : 0);
   const hasFilters = activeFilterCount > 0 || q.trim() !== "";
 
@@ -177,7 +175,7 @@ export function PortalMarketplace() {
       if (!terms.length) return true;
       const hay = [
         d.name, d.summary ?? "", d.operator ?? "", d.rrc ?? "",
-        ...d.counties, ...d.states, ...d.abstractIds, ...d.basins, ...d.formations, ...d.assetTypes,
+        ...d.counties, ...d.states, ...d.abstractIds, ...d.assetTypes,
       ].join("  ").toLowerCase();
       return terms.every((t) => hay.includes(t));
     };
@@ -185,8 +183,6 @@ export function PortalMarketplace() {
       matchesQuery(d) &&
       (!fStates.length || d.states.some((s) => fStates.includes(s))) &&
       (!fCounties.length || d.counties.some((c) => fCounties.includes(c))) &&
-      (!fBasins.length || d.basins.some((b) => fBasins.includes(b))) &&
-      (!fFormations.length || d.formations.some((f) => fFormations.includes(f))) &&
       (!fAssetTypes.length || d.assetTypes.some((t) => fAssetTypes.includes(t))) &&
       (!fOperators.length || (d.operator != null && fOperators.includes(d.operator))) &&
       (d.nra == null ? min === 0 : d.nra >= min && d.nra <= max);
@@ -198,7 +194,7 @@ export function PortalMarketplace() {
       name: (a, b) => a.name.localeCompare(b.name),
     };
     return rows.sort(cmp[sort]);
-  }, [deals, q, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
+  }, [deals, q, fStates, fCounties, fAssetTypes, fOperators, nraMin, nraMax, sort]);
 
 
   // One removable chip per active filter value (same state the dropdowns edit).
@@ -206,8 +202,6 @@ export function PortalMarketplace() {
   const chips: { key: string; k: string; v: string; remove: () => void }[] = [
     ...fStates.map((v) => ({ key: `st:${v}`, k: "State", v, remove: drop(setFStates, v) })),
     ...fCounties.map((v) => ({ key: `co:${v}`, k: "County", v, remove: drop(setFCounties, v) })),
-    ...fBasins.map((v) => ({ key: `ba:${v}`, k: "Basin", v, remove: drop(setFBasins, v) })),
-    ...fFormations.map((v) => ({ key: `fo:${v}`, k: "Formation", v, remove: drop(setFFormations, v) })),
     ...fAssetTypes.map((v) => ({ key: `ty:${v}`, k: "Type", v: typeLabel(v), remove: drop(setFAssetTypes, v) })),
     ...fOperators.map((v) => ({ key: `op:${v}`, k: "Operator", v, remove: drop(setFOperators, v) })),
     ...(nraMin ? [{ key: "nmin", k: "NRA min", v: nraMin, remove: () => setNraMin("") }] : []),
@@ -252,7 +246,7 @@ export function PortalMarketplace() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search opportunities — name, county, abstract, operator, basin, formation, RRC…"
+              placeholder="Search opportunities — name, county, abstract, operator, RRC…"
               aria-label="Search opportunities"
             />
             {q && (
@@ -310,8 +304,6 @@ export function PortalMarketplace() {
                 countyOptions={options.counties.length ? options.counties : undefined}
                 labels={{ state: "State", county: "County" }}
               />
-              <div className="field"><label>Basin</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={fBasins} onChange={setFBasins} placeholder="Any basin" /></div>
-              <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={fFormations} onChange={setFFormations} placeholder="Any formation" /></div>
               <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
               <div className="field"><label>Operator</label><SearchableMultiSelect options={options.operators} value={fOperators} onChange={setFOperators} placeholder="Any operator" /></div>
               <div className="field">
@@ -384,7 +376,7 @@ export function PortalMarketplace() {
           ) : view === "grid" ? (
             <div className="pp-cards">
               {filtered.map((d) => {
-                const sub = [d.formations[0], d.operator].filter(Boolean).join(" · ");
+                const sub = d.operator ?? "";
                 return (
                   <div key={d.slug} className="pp-lcard" role="link" tabIndex={0} onClick={() => open(d)}
                     onKeyDown={(e) => { if (e.key === "Enter") open(d); }}>
@@ -395,7 +387,7 @@ export function PortalMarketplace() {
                         {d.producingStatus && <span className={`pp-chip prod ${d.producingStatus === "Producing" ? "on" : ""}`}><i />{d.producingStatus}</span>}
                       </div>
                       <span className="pp-lcard-name">{d.name}</span>
-                      <span className="pp-lcard-loc">{locOf(d)}{d.basins.length ? ` · ${d.basins[0]}` : ""}</span>
+                      <span className="pp-lcard-loc">{locOf(d)}</span>
                     </div>
                     <div className="pp-lcard-stats">
                       <div><span>NRA</span><b>{d.nra != null ? acres(d.nra) : "—"}</b></div>
@@ -480,7 +472,7 @@ const MapIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none
 function LeadCapture({ orgSlug, done, onDone, onClose }: { orgSlug: string; done: boolean; onDone: () => void; onClose: () => void }) {
   const [f, setF] = useState({
     companyName: "", contactName: "", email: "", phone: "", preferredContact: "either" as "email" | "phone" | "either",
-    states: [] as string[], counties: [] as string[], basins: [] as string[], formations: [] as string[], assetTypes: [] as string[],
+    states: [] as string[], counties: [] as string[], assetTypes: [] as string[],
     minAcreage: "", maxAcreage: "", minPrice: "", maxPrice: "", additionalCriteria: "",
   });
   const [busy, setBusy] = useState(false);
@@ -507,7 +499,7 @@ function LeadCapture({ orgSlug, done, onDone, onClose }: { orgSlug: string; done
         companyName: f.companyName, contactName: f.contactName, email: f.email, phone: f.phone,
         preferredContact: f.preferredContact,
         buyBox: {
-          states: f.states, counties: f.counties, basins: f.basins, formations: f.formations, assetTypes: f.assetTypes,
+          states: f.states, counties: f.counties, assetTypes: f.assetTypes,
           minAcreage: f.minAcreage ? Number(f.minAcreage) : null, maxAcreage: f.maxAcreage ? Number(f.maxAcreage) : null,
           minPrice: f.minPrice ? Number(f.minPrice) : null, maxPrice: f.maxPrice ? Number(f.maxPrice) : null,
         },
@@ -566,8 +558,6 @@ function LeadCapture({ orgSlug, done, onDone, onClose }: { orgSlug: string; done
             counties={f.counties} onCountiesChange={set("counties")}
             labels={{ state: "States *", county: "Counties *" }}
           />
-          <div className="field"><label>Basins</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={set("basins")} placeholder="Any" /></div>
-          <div className="field"><label>Formations</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={set("formations")} placeholder="Any" /></div>
           <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={set("assetTypes")} placeholder="Any" /></div>
           <div className="field"><label>Min acreage</label><input type="number" min="0" value={f.minAcreage} onChange={(e) => set("minAcreage")(e.target.value)} /></div>
           <div className="field"><label>Max acreage</label><input type="number" min="0" value={f.maxAcreage} onChange={(e) => set("maxAcreage")(e.target.value)} /></div>

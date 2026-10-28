@@ -45,7 +45,7 @@ async function loadDealContext(req: AuthedRequest, dealId: string): Promise<{ na
     ctx: {
       name: s.name, stage: s.stage, recordType: s.recordType,
       state: s.state, states: s.states, counties: s.counties,
-      operator: s.operator, assetTypes: s.assetTypes, basins: s.basins, formations: s.formations,
+      operator: s.operator, assetTypes: s.assetTypes,
       acreageNma: s.acreageNma, nra: s.nra, royaltyRate: s.royaltyRate,
       askPrice: s.askPrice, ourPrice: s.ourPrice, estimatedClosingCosts: s.estimatedClosingCosts,
       sellerNames: s.sellerNames, selectedBuyer: s.selectedBuyer ? { name: s.selectedBuyer.name } : null,
@@ -82,7 +82,7 @@ aiRouter.post(
     if (!buyer) throw new HttpError(404, "Buyer not found");
     const box = buyer.buyBox;
     const focus = box
-      ? [...box.states, ...box.counties, ...box.basins, ...box.formations, ...box.assetTypes].filter(Boolean).join(", ")
+      ? [...box.states, ...box.counties, ...box.assetTypes].filter(Boolean).join(", ")
       : "";
     const draft = await draftOutreach(orgId(req), ctx, { name: buyer.name, companyName: buyer.companyName, focus }, instructions);
     await logActivity({

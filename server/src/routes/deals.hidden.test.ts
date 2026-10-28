@@ -152,7 +152,7 @@ describe("POST /deals/bulk-hidden and /deals/:id/hidden", () => {
     db.results["deal.updateMany"] = { count: 1 };
     db.results["deal.findUniqueOrThrow"] = {
       id: "d1", name: "Smith 40ac", organizationId: ORG, stage: "UNDER_CONTRACT", currentStageEnteredAt: hiddenAt, hiddenAt,
-      counties: [], states: [], sellerNames: [], abstractIds: [], assetTypes: [], basins: [], formations: [], surveys: [], wells: [], leaseStatuses: [], docFolders: [],
+      counties: [], states: [], sellerNames: [], abstractIds: [], assetTypes: [], surveys: [], wells: [], leaseStatuses: [], docFolders: [],
       selectedBuyer: null, relationshipOwner: null, assignees: [], recordType: "OPPORTUNITY", createdAt: hiddenAt, updatedAt: hiddenAt,
     };
     await withApp(async (port) => {

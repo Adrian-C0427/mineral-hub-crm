@@ -172,8 +172,6 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     // Buyer Purchase Price − Our Cost − closing costs reconciles to it.
     buyerPurchasePrice: bestOffer,
     assetTypes: deal.assetTypes,
-    basins: deal.basins,
-    formations: deal.formations,
     stage: deal.stage,
     // Null means the org's default pipeline.
     pipelineId: deal.pipelineId ?? null,

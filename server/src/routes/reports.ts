@@ -158,8 +158,6 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
       stage: d.stage,
       states: d.states.length ? d.states : d.state ? [d.state] : [],
       counties: d.counties,
-      basins: d.basins,
-      formations: d.formations,
       assetTypes: d.assetTypes,
       operator: d.operator,
       askPrice: d.askPrice,
@@ -202,8 +200,6 @@ function analyticsQuery(q: AuthedRequest["query"]) {
   const filters = {
     states: arrParam(q.states),
     counties: arrParam(q.counties),
-    basins: arrParam(q.basins),
-    formations: arrParam(q.formations),
     assetTypes: arrParam(q.assetTypes),
     operators: arrParam(q.operators),
     stages: arrParam(q.stages),
@@ -227,8 +223,6 @@ function filterDeals(all: AnalyticsDeal[], filters: AnalyticsFilters): Analytics
     (d) =>
       intersects(d.states, filters.states) &&
       intersects(d.counties, filters.counties) &&
-      intersects(d.basins, filters.basins) &&
-      intersects(d.formations, filters.formations) &&
       intersects(d.assetTypes, filters.assetTypes) &&
       (filters.operators.length === 0 || (d.operator != null && filters.operators.includes(d.operator))) &&
       (filters.stages.length === 0 || filters.stages.includes(d.stage)) &&
@@ -378,7 +372,7 @@ reportsRouter.get(
     const [deals, buyers, users, orgStages] = await Promise.all([
       prisma.deal.findMany({
         where: { organizationId: org },
-        select: { counties: true, basins: true, formations: true, assetTypes: true, operator: true },
+        select: { counties: true, assetTypes: true, operator: true },
       }),
       prisma.buyer.findMany({ where: { organizationId: org }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
       prisma.user.findMany({ where: { organizationId: org }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
@@ -387,8 +381,6 @@ reportsRouter.get(
     const uniq = (xs: string[]) => Array.from(new Set(xs.filter(Boolean))).sort();
     res.json({
       counties: uniq(deals.flatMap((d) => d.counties)),
-      basins: uniq(deals.flatMap((d) => d.basins)),
-      formations: uniq(deals.flatMap((d) => d.formations)),
       assetTypes: uniq(deals.flatMap((d) => d.assetTypes)),
       operators: uniq(deals.map((d) => d.operator ?? "").filter(Boolean)),
       buyers,

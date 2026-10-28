@@ -28,7 +28,6 @@ export interface HeatWell {
   api: string;
   type: string;
   status: string;
-  formations: string[];
 }
 
 export interface HeatPoint extends HeatWell {
@@ -41,7 +40,6 @@ export interface HeatFilters {
   operators: string[];
   wellTypes: string[];
   wellStatuses: string[];
-  formations: string[];
 }
 
 /** 6 mcf ≈ 1 boe — a rough gas→oil equivalence so oil and gas can be ranked together. */
@@ -127,7 +125,6 @@ export function extractWells(features: { properties: Record<string, unknown>; ge
       api: (p.api as string) || "",
       type: (p.type as string) || "",
       status: (p.status as string) || "",
-      formations: Array.isArray(p.formations) ? (p.formations as string[]) : (p.formations ? String(p.formations).split(",").map((s) => s.trim()) : []),
     });
   }
   return out;
@@ -145,7 +142,6 @@ function passes(w: HeatWell, f: HeatFilters): boolean {
   if (f.operators.length && !(w.operator && f.operators.includes(w.operator))) return false;
   if (f.wellTypes.length && !f.wellTypes.includes(w.type)) return false;
   if (f.wellStatuses.length && !f.wellStatuses.includes(w.status)) return false;
-  if (f.formations.length && !w.formations.some((x) => f.formations.includes(x))) return false;
   return true;
 }
 
@@ -225,7 +221,7 @@ export function summarize(points: HeatPoint[]): AreaSummary {
 }
 
 export interface RankRow { name: string; oil: number; gas: number; wells: number }
-export interface Rankings { counties: RankRow[]; operators: RankRow[]; formations: RankRow[] }
+export interface Rankings { counties: RankRow[]; operators: RankRow[] }
 
 function rankBy(points: HeatPoint[], key: (p: HeatPoint) => string[]): RankRow[] {
   const m = new Map<string, RankRow>();
@@ -237,12 +233,11 @@ function rankBy(points: HeatPoint[], key: (p: HeatPoint) => string[]): RankRow[]
   return [...m.values()].sort((a, b) => boe(b.oil, b.gas) - boe(a.oil, a.gas)).slice(0, 5);
 }
 
-/** Top counties / operators / formations for the active point set. */
+/** Top counties / operators for the active point set. */
 export function rankings(points: HeatPoint[]): Rankings {
   return {
     counties: rankBy(points, (p) => [p.county]),
     operators: rankBy(points, (p) => [p.operator || ""]),
-    formations: rankBy(points, (p) => p.formations),
   };
 }
 

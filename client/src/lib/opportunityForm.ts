@@ -27,9 +27,6 @@ export interface OppForm {
   estAcres: string;
   estNma: string;
   estNra: string;
-  /** Basin / formation tags (suggested from the abstract or county, always editable). */
-  basins: string[];
-  formations: string[];
   source: string;
   /** "YYYY-MM-DD", or "" for none. */
   nextFollowUpDate: string;
@@ -39,7 +36,7 @@ export interface OppForm {
 export const OPP_FIELD_LABELS: Record<keyof OppForm, string> = {
   name: "Name", ownerId: "Owner", contactId: "Linked contact", sellerName: "Seller name", companyName: "Company",
   phone: "Phone", email: "Email", state: "State", county: "County", abstract: "Abstract", survey: "Survey",
-  estAcres: "Est. gross acres", estNma: "Est. NMA", estNra: "Est. NRA", basins: "Basin", formations: "Formation", source: "Source",
+  estAcres: "Est. gross acres", estNma: "Est. NMA", estNra: "Est. NRA", source: "Source",
   nextFollowUpDate: "Next follow-up", notes: "Notes",
 };
 
@@ -54,7 +51,6 @@ export function emptyOppForm(ownerId = ""): OppForm {
   return {
     name: "", ownerId, contactId: "", sellerName: "", companyName: "", phone: "", email: "",
     state: "", county: "", abstract: "", survey: "", estAcres: "", estNma: "", estNra: "",
-    basins: [], formations: [],
     source: "", nextFollowUpDate: "", notes: "",
   };
 }
@@ -65,13 +61,12 @@ const n = (v: number | null | undefined) => (v == null ? "" : String(v));
 /** A saved opportunity as form values (edit mode). */
 export function oppFormFromRecord(o: Pick<Opp,
   "name" | "owner" | "contactId" | "sellerName" | "companyName" | "phone" | "email" | "state" | "county" | "abstract" | "survey"
-  | "estAcres" | "estNma" | "estNra" | "basins" | "formations" | "source" | "nextFollowUpDate" | "notes">): OppForm {
+  | "estAcres" | "estNma" | "estNra" | "source" | "nextFollowUpDate" | "notes">): OppForm {
   return {
     name: o.name, ownerId: o.owner?.id ?? "", contactId: s(o.contactId),
     sellerName: s(o.sellerName), companyName: s(o.companyName), phone: s(o.phone), email: s(o.email),
     state: s(o.state), county: s(o.county), abstract: s(o.abstract), survey: s(o.survey),
     estAcres: n(o.estAcres), estNma: n(o.estNma), estNra: n(o.estNra),
-    basins: [...(o.basins ?? [])], formations: [...(o.formations ?? [])],
     source: s(o.source), nextFollowUpDate: toInputDate(o.nextFollowUpDate), notes: s(o.notes),
   };
 }
@@ -102,8 +97,7 @@ export function checkOppForm(f: OppForm, opts: { editing?: boolean; pipelineId?:
     if (v !== "" && !(Number.isFinite(Number(v)) && Number(v) >= 0)) invalid.push(`${OPP_FIELD_LABELS[k]} must be a number of 0 or more`);
   }
   for (const [k, max] of Object.entries(OPP_TEXT_LIMITS) as [keyof OppForm, number][]) {
-    const v = f[k];
-    if (typeof v === "string" && v.trim().length > max) invalid.push(`${OPP_FIELD_LABELS[k]} is too long (${max.toLocaleString("en-US")} characters max)`);
+    if (f[k].trim().length > max) invalid.push(`${OPP_FIELD_LABELS[k]} is too long (${max.toLocaleString("en-US")} characters max)`);
   }
   if (f.nextFollowUpDate && !/^\d{4}-\d{2}-\d{2}$/.test(f.nextFollowUpDate)) invalid.push("Next follow-up is not a valid date");
   return { missing, invalid };
@@ -112,9 +106,8 @@ export function checkOppForm(f: OppForm, opts: { editing?: boolean; pipelineId?:
 const text = (v: string) => (v.trim() === "" ? null : v.trim());
 const num = (v: string) => (v.trim() === "" ? null : Number(v));
 
-export type OppBodyValue = string | number | string[] | null;
-/** The editable fields as the API takes them (blank → null; tag lists trimmed and de-duplicated). */
-export function oppBody(f: OppForm): Record<keyof OppForm, OppBodyValue> {
+/** The editable fields as the API takes them (blank → null). */
+export function oppBody(f: OppForm): Record<keyof OppForm, string | number | null> {
   return {
     name: f.name.trim(),
     ownerId: f.ownerId || null,
@@ -130,25 +123,18 @@ export function oppBody(f: OppForm): Record<keyof OppForm, OppBodyValue> {
     estAcres: num(f.estAcres),
     estNma: num(f.estNma),
     estNra: num(f.estNra),
-    basins: tags(f.basins),
-    formations: tags(f.formations),
     source: text(f.source),
     nextFollowUpDate: f.nextFollowUpDate || null,
     notes: text(f.notes),
   };
 }
-const tags = (xs: readonly string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
 
 /** PATCH body: only the fields whose saved value changed (empty = nothing to save). */
-export function oppPatchBody(saved: OppForm, f: OppForm): Partial<Record<keyof OppForm, OppBodyValue>> {
+export function oppPatchBody(saved: OppForm, f: OppForm): Partial<Record<keyof OppForm, string | number | null>> {
   const before = oppBody(saved);
   const after = oppBody(f);
-  const out: Partial<Record<keyof OppForm, OppBodyValue>> = {};
-  for (const k of Object.keys(after) as (keyof OppForm)[]) {
-    const a = after[k], b = before[k];
-    const same = Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((x, i) => x === b[i]) : a === b;
-    if (!same) out[k] = a;
-  }
+  const out: Partial<Record<keyof OppForm, string | number | null>> = {};
+  for (const k of Object.keys(after) as (keyof OppForm)[]) if (after[k] !== before[k]) out[k] = after[k];
   return out;
 }
 

@@ -108,8 +108,6 @@ interface PipelineFilterState {
   priority: "" | "HIGH" | "MEDIUM" | "LOW";
   states: string[];
   counties: string[];
-  basins: string[];
-  formations: string[];
   buyerId: string;
   assigneeId: string;
   overdueOnly: boolean;
@@ -120,7 +118,7 @@ interface PipelineFilterState {
   buyerMin: string; buyerMax: string;
 }
 const EMPTY_FILTERS: PipelineFilterState = {
-  q: "", priority: "", states: [], counties: [], basins: [], formations: [], buyerId: "", assigneeId: "", overdueOnly: false,
+  q: "", priority: "", states: [], counties: [], buyerId: "", assigneeId: "", overdueOnly: false,
   nraMin: "", nraMax: "", nmaMin: "", nmaMax: "", ourMin: "", ourMax: "", buyerMin: "", buyerMax: "",
 };
 // The card's figures — display, sort, and filter on these.
@@ -137,7 +135,7 @@ function inRange(v: number | null | undefined, min: number | null, max: number |
 }
 function activeFilterCount(f: PipelineFilterState): number {
   return (f.q.trim() ? 1 : 0) + (f.priority ? 1 : 0) + (f.states.length ? 1 : 0) +
-    (f.counties.length ? 1 : 0) + (f.basins.length ? 1 : 0) + (f.formations.length ? 1 : 0) + (f.buyerId ? 1 : 0) + (f.assigneeId ? 1 : 0) + (f.overdueOnly ? 1 : 0) +
+    (f.counties.length ? 1 : 0) + (f.buyerId ? 1 : 0) + (f.assigneeId ? 1 : 0) + (f.overdueOnly ? 1 : 0) +
     (bound(f.nraMin) !== null || bound(f.nraMax) !== null ? 1 : 0) +
     (bound(f.nmaMin) !== null || bound(f.nmaMax) !== null ? 1 : 0) +
     (bound(f.ourMin) !== null || bound(f.ourMax) !== null ? 1 : 0) +
@@ -150,8 +148,6 @@ function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): Deal
     (!f.priority || d.priority === f.priority) &&
     (!f.states.length || d.states.some((s) => f.states.includes(s)) || (d.state != null && f.states.includes(d.state))) &&
     (!f.counties.length || d.counties.some((c) => f.counties.includes(c))) &&
-    (!f.basins.length || d.basins.some((b) => f.basins.includes(b))) &&
-    (!f.formations.length || d.formations.some((x) => f.formations.includes(x))) &&
     (!f.buyerId || d.selectedBuyer?.id === f.buyerId) &&
     (!f.assigneeId || d.assignees.some((a) => a.id === f.assigneeId) || d.relationshipOwner?.id === f.assigneeId) &&
     (!f.overdueOnly || d.isOverdue) &&
@@ -165,15 +161,13 @@ function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): Deal
 function filterOptions(deals: DealSummary[]) {
   const states = [...new Set(deals.flatMap((d) => [...d.states, ...(d.state ? [d.state] : [])]))].sort();
   const counties = [...new Set(deals.flatMap((d) => d.counties))].sort();
-  const basins = [...new Set(deals.flatMap((d) => d.basins))].sort();
-  const formations = [...new Set(deals.flatMap((d) => d.formations))].sort();
   const buyers = [...new Map(deals.flatMap((d) => (d.selectedBuyer ? [[d.selectedBuyer.id, d.selectedBuyer.name] as const] : []))).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
   const people = [...new Map(deals.flatMap((d) => [
     ...d.assignees.map((a) => [a.id, a.name] as const),
     ...(d.relationshipOwner ? [[d.relationshipOwner.id, d.relationshipOwner.name] as const] : []),
   ])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  return { states, counties, basins, formations, buyers, people };
+  return { states, counties, buyers, people };
 }
 
 const PRIORITY_LABEL: Record<string, string> = { HIGH: "High", MEDIUM: "Medium", LOW: "Low" };
@@ -193,8 +187,6 @@ function filterTags(f: PipelineFilterState, deals: DealSummary[]): { key: string
     { key: "priority", label: f.priority ? `Priority: ${PRIORITY_LABEL[f.priority]}` : null, clear: { priority: "" } },
     { key: "states", label: f.states.length ? `State: ${f.states.join(", ")}` : null, clear: { states: [] } },
     { key: "counties", label: f.counties.length ? `County: ${f.counties.join(", ")}` : null, clear: { counties: [] } },
-    { key: "basins", label: f.basins.length ? `Basin: ${f.basins.join(", ")}` : null, clear: { basins: [] } },
-    { key: "formations", label: f.formations.length ? `Formation: ${f.formations.join(", ")}` : null, clear: { formations: [] } },
     { key: "buyer", label: f.buyerId ? `Buyer: ${buyers.find(([id]) => id === f.buyerId)?.[1] ?? "Selected buyer"}` : null, clear: { buyerId: "" } },
     { key: "team", label: f.assigneeId ? `Team member: ${people.find(([id]) => id === f.assigneeId)?.[1] ?? "Selected"}` : null, clear: { assigneeId: "" } },
     { key: "nra", label: range("NRA", f.nraMin, f.nraMax, (n) => num(n)), clear: { nraMin: "", nraMax: "" } },
@@ -831,7 +823,7 @@ function PipelineFilters({ deals, filters, onChange, shown }: {
 }) {
   const { open, setOpen, ref } = usePopover();
   // Option lists come from the deals actually on the board.
-  const { states, counties, basins, formations, buyers, people } = filterOptions(deals);
+  const { states, counties, buyers, people } = filterOptions(deals);
   const n = activeFilterCount(filters);
 
   return (
@@ -872,15 +864,6 @@ function PipelineFilters({ deals, filters, onChange, shown }: {
               </PopField>
               <PopField label="County">
                 <SearchableMultiSelect options={counties} value={filters.counties} onChange={(v) => onChange({ ...filters, counties: v })} placeholder="Any county" />
-              </PopField>
-            </div>
-            {/* Geology: the basins / formations tagged on the deals on this board. */}
-            <div className="pl-grid2">
-              <PopField label="Basin">
-                <SearchableMultiSelect options={basins} value={filters.basins} onChange={(v) => onChange({ ...filters, basins: v })} placeholder={basins.length ? "Any basin" : "No basins tagged yet"} disabled={!basins.length && !filters.basins.length} />
-              </PopField>
-              <PopField label="Formation">
-                <SearchableMultiSelect options={formations} value={filters.formations} onChange={(v) => onChange({ ...filters, formations: v })} placeholder={formations.length ? "Any formation" : "No formations tagged yet"} disabled={!formations.length && !filters.formations.length} />
               </PopField>
             </div>
             <PopField label="Selected buyer">

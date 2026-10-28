@@ -124,21 +124,21 @@ describe("Full Wellbore fold (dbf900)", () => {
     return buf;
   };
 
-  it("accumulates formations, lease/survey, plug date and latest oil W-10", () => {
+  it("accumulates lease/survey, plug date and latest oil W-10; skips other record types", () => {
     let facts: WellboreFacts | null = null;
     const root = rec("01", (b) => encodeCp037("16112345").copy(b, 2));
     ({ facts } = foldRecord(root, facts));
     expect(facts!.api8).toBe("16112345");
 
-    foldRecord(rec("09", (b) => encodeCp037("COTTON VALLEY").copy(b, 5)), facts);
-    foldRecord(rec("09", (b) => encodeCp037("TRAVIS PEAK").copy(b, 5)), facts);
+    const before = JSON.stringify(facts);
+    foldRecord(rec("09", (b) => encodeCp037("ANY PAYLOAD").copy(b, 5)), facts);
+    expect(JSON.stringify(facts)).toBe(before); // type 09 records are not read
     foldRecord(rec("12", (b) => { encodeCp037("SMITH UNIT").copy(b, 2); encodeCp037("J PONCE SVY A-123").copy(b, 34); }), facts);
     foldRecord(rec("14", (b) => encodeCp037("20191104").copy(b, 2)), facts);
     // Two W-10s — the later year wins.
     foldRecord(rec("23", (b) => { encodeCp037("111111").copy(b, 11); encodeCp037("2019").copy(b, 17); encodeCp037("05").copy(b, 23); encodeCp037("00123456").copy(b, 25); }), facts);
     foldRecord(rec("23", (b) => { encodeCp037("222222").copy(b, 11); encodeCp037("2024").copy(b, 17); encodeCp037("05").copy(b, 23); encodeCp037("00123456").copy(b, 25); }), facts);
 
-    expect(facts!.formations).toEqual(["COTTON VALLEY", "TRAVIS PEAK"]);
     expect(facts!.leaseName).toBe("SMITH UNIT");
     expect(facts!.survey).toBe("J PONCE SVY A-123");
     expect(facts!.plugDate).toBe("2019-11-04");

@@ -176,7 +176,7 @@ export function buildTileSql(sonris: boolean, refreshed = true): string {
           WHERE b.bh_geom && w.box${laBottoms}
        ),` : ""}
        dome_mvt AS (
-         -- East Texas Basin salt dome outlines, digitized from BEG RI-140's
+         -- East Texas salt dome outlines, digitized from BEG RI-140's
          -- per-dome structure-contour maps (basis = which contour was traced).
          SELECT ${mvt("sd.geom")} AS geom,
                 sd.id, sd.name, sd.county, sd.crest_ft AS "crestFt", sd.basis
@@ -264,18 +264,15 @@ gisRouter.use(rateLimit({
 const searchSchema = z.object({ q: z.string().trim().min(MIN_SEARCH_CHARS).max(120) });
 
 // ---------------------------------------------------------------------------
-// Reference index — precomputed operator / field / formation lists
+// Reference index — precomputed operator / field lists
 //
 // /suggest used to derive these per request: `GROUP BY operator` (and
-// field_name, and `unnest(formations)`) across rrc.wells, three aggregations
-// over the whole table on every keystroke. The formations one can never be
-// indexed at all — `unnest` forces a full scan regardless of the term — so no
-// amount of index work fixes it in place.
+// field_name) across rrc.wells, full-table aggregations on every keystroke.
 //
 // They are aggregations over IMMUTABLE reference data: rrc.wells changes only
 // on the monthly ingest. So compute them once and rank in memory (see
 // domain/search), which is the same reasoning as the tile LRU above. Cost per
-// request drops from three full-table aggregations to a filter over a few
+// request drops from full-table aggregations to a filter over a few
 // thousand cached rows.
 //
 // Single-flight: a cold cache under concurrent load must issue ONE load, not
@@ -285,7 +282,6 @@ const searchSchema = z.object({ q: z.string().trim().min(MIN_SEARCH_CHARS).max(1
 interface WellReferenceIndex {
   operators: RefEntry[];
   fields: RefEntry[];
-  formations: RefEntry[];
   /** Filter-option lists for the unscoped (no county selected) /options call. */
   types: string[];
   /** Wellbore profiles (Vertical / Horizontal / Directional) — after the RRC refresh. */
@@ -296,7 +292,7 @@ interface WellReferenceIndex {
 }
 
 const EMPTY_REFERENCE: WellReferenceIndex = {
-  operators: [], fields: [], formations: [], types: [], profiles: [], statuses: [], wellCount: 0, surveys: [],
+  operators: [], fields: [], types: [], profiles: [], statuses: [], wellCount: 0, surveys: [],
 };
 
 /** Reference data is re-imported monthly; re-read it a few times a day. */
@@ -316,13 +312,9 @@ async function loadReferenceIndex(): Promise<WellReferenceIndex> {
   const profileAgg = rrcRefreshAvailable()
     ? prisma.$queryRawUnsafe<{ profiles: string[] | null }[]>(`SELECT array_agg(DISTINCT profile) FILTER (WHERE profile IS NOT NULL) AS profiles FROM rrc.wells`)
     : Promise.resolve([{ profiles: [] as string[] }]);
-  const [operators, fields, formations, wellAgg, absAgg, profRows] = await Promise.all([
+  const [operators, fields, wellAgg, absAgg, profRows] = await Promise.all([
     agg("operator"),
     agg("field_name"),
-    prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
-      `SELECT f AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext
-         FROM rrc.wells, unnest(formations) AS f WHERE f IS NOT NULL AND f <> '' GROUP BY f`,
-    ),
     prisma.$queryRawUnsafe<{ types: string[] | null; statuses: string[] | null; n: number }[]>(
       `SELECT array_agg(DISTINCT type) FILTER (WHERE type IS NOT NULL) AS types,
               array_agg(DISTINCT status) FILTER (WHERE status IS NOT NULL) AS statuses,
@@ -344,7 +336,6 @@ async function loadReferenceIndex(): Promise<WellReferenceIndex> {
   return {
     operators: mergeRefEntries(entries(operators), la ? entries(la.operators) : []),
     fields: mergeRefEntries(entries(fields), la ? entries(la.fields) : []),
-    formations: entries(formations),
     types: [...new Set([...(w?.types ?? []), ...(la?.types ?? [])])].sort(),
     profiles: sortProfiles(profRows[0]?.profiles ?? []),
     statuses: [...new Set([...(w?.statuses ?? []), ...(la?.statuses ?? [])])].sort(),
@@ -427,7 +418,7 @@ export function clearGisCaches(): void {
 /**
  * Unified map search: one query, every entity the map knows about — counties,
  * abstracts, surveys, wells (API #, well #, lease name/number), operators,
- * fields, formations, basins, and the org's deals & mineral assets. Each group
+ * fields, and the org's deals & mineral assets. Each group
  * is ranked by trigram similarity and capped; the client interleaves groups.
  * Result rows carry an `action` payload the client uses to zoom/highlight or
  * apply a filter.
@@ -539,18 +530,14 @@ gisRouter.get(
       sonrisWellsAvailable()
         ? prisma.$queryRawUnsafe<LaSuggestRow[]>(LA_WELL_SQL.suggest, like, q, identifierDigits(q))
         : Promise.resolve([] as LaSuggestRow[]),
-      // Operators, fields and formations come from the precomputed reference
-      // index and are ranked in memory — see WellReferenceIndex above for why
-      // these three cannot remain per-request aggregations.
+      // Operators and fields come from the precomputed reference index and
+      // are ranked in memory — see WellReferenceIndex above for why these
+      // cannot remain per-request aggregations.
       referenceIndex(),
-      // The org's deals and mineral assets, matched on name or basin. Basin
-      // itself has no geometry — matching deals stand in for it.
+      // The org's deals and mineral assets, matched on name.
       prisma.deal.findMany({
-        where: {
-          organizationId: orgId(req),
-          OR: [{ name: { contains: q, mode: "insensitive" } }, { basins: { has: q } }],
-        },
-        select: { id: true, name: true, recordType: true, stage: true, counties: true, abstractIds: true, basins: true },
+        where: { organizationId: orgId(req), name: { contains: q, mode: "insensitive" } },
+        select: { id: true, name: true, recordType: true, stage: true, counties: true, abstractIds: true },
         orderBy: { updatedAt: "desc" },
         take: 100,
       }),
@@ -596,14 +583,13 @@ gisRouter.get(
       ].sort((a, b) => b.score - a.score).slice(0, 200).map(({ score: _score, ...w }) => w),
       operators: rankRefEntries(reference.operators, q, 100).map((o) => ({ name: o.name, sub: `${o.n} wells · filters the map`, bbox: o.bbox })),
       fields: rankRefEntries(reference.fields, q, 100).map((f) => ({ name: f.name, sub: `${f.n} wells`, bbox: f.bbox })),
-      formations: rankRefEntries(reference.formations, q, 100).map((f) => ({ name: f.name, sub: `${f.n} wells · filters the map`, bbox: f.bbox })),
       deals: deals.filter((d) => d.recordType !== "OWNED_ASSET").map((d) => ({
         id: d.id, label: d.name, abstractIds: d.abstractIds,
-        sub: [d.stage, d.counties.join(", "), d.basins.join(", ")].filter(Boolean).join(" · "),
+        sub: [d.stage, d.counties.join(", ")].filter(Boolean).join(" · "),
       })),
       assets: deals.filter((d) => d.recordType === "OWNED_ASSET").map((d) => ({
         id: d.id, label: d.name, abstractIds: d.abstractIds,
-        sub: [d.counties.join(", "), d.basins.join(", ")].filter(Boolean).join(" · "),
+        sub: d.counties.join(", "),
       })),
     });
   }),
@@ -731,7 +717,7 @@ export function rrcWellDetail(r: Record<string, unknown>, lon: number, lat: numb
     fid: v("fid"), api8: v("api8"), api: v("api10"), wellNo: v("well_no"), wellId: v("well_id"), symbol: v("symbol"),
     type: v("type"), status: v("status"), county: v("county"), district: v("district"), leaseNo: v("lease_no"),
     leaseName: v("lease_name"), operator: v("operator"), operatorNo: v("operator_no"), fieldNo: v("field_no"),
-    field: v("field_name"), oilGas: v("oil_gas"), formations: v("formations"), spudDate: v("spud_date"), plugDate: v("plug_date"),
+    field: v("field_name"), oilGas: v("oil_gas"), spudDate: v("spud_date"), plugDate: v("plug_date"),
     cumOil: v("cum_oil"), cumGas: v("cum_gas"), lastProd: v("last_prod"), abstract: v("abstract"), survey: v("survey"),
     abstractId: v("abstract_id"), lon, lat,
     // RRC refresh (2026-10): normalized status + its evidence.

@@ -37,7 +37,6 @@ interface WellSpec {
   status: "PRODUCING" | "SHUT_IN" | "PLUGGED" | "INACTIVE" | "UNKNOWN";
   trajectory: "VERTICAL" | "HORIZONTAL" | "DIRECTIONAL" | "UNKNOWN";
   wellType: string;
-  formation: string;
   months: number; // history length
   qiOil: number; // bbl/month at peak
   qiGasPerOil: number; // mcf per bbl (GOR proxy); for gas wells use qiGas directly
@@ -54,38 +53,38 @@ const WELLS: WellSpec[] = [
   {
     name: "MUSTANG DRAW UNIT 1H", apiNumber: "42-329-41876", operator: "Permian Legacy Operating LLC",
     leaseName: "MUSTANG DRAW UNIT", county: "Midland", status: "PRODUCING", trajectory: "HORIZONTAL",
-    wellType: "OIL", formation: "Wolfcamp B", months: 30, qiOil: 18500, qiGasPerOil: 2.4, b: 1.1,
+    wellType: "OIL", months: 30, qiOil: 18500, qiGasPerOil: 2.4, b: 1.1,
     diAnnual: 2.6, nglYield: 0.09, waterCut: 2.8,
   },
   {
     name: "SPRABERRY TREND 22-3", apiNumber: "42-329-38455", operator: "Caprock Drilling Partners",
     leaseName: "SPRABERRY TREND", county: "Midland", status: "PRODUCING", trajectory: "VERTICAL",
-    wellType: "OIL", formation: "Spraberry", months: 96, qiOil: 2600, qiGasPerOil: 1.8, b: 0.4,
+    wellType: "OIL", months: 96, qiOil: 2600, qiGasPerOil: 1.8, b: 0.4,
     diAnnual: 0.28, nglYield: 0.06, waterCut: 1.9,
   },
   {
     name: "HALLMARK A-3", apiNumber: "42-161-33210", operator: "Big Thicket Energy LLC",
     leaseName: "HALLMARK", county: "Freestone", status: "PRODUCING", trajectory: "VERTICAL",
-    wellType: "GAS", formation: "Bossier", months: 84, qiOil: 40, qiGasPerOil: 0, qiGas: 42000,
+    wellType: "GAS", months: 84, qiOil: 40, qiGasPerOil: 0, qiGas: 42000,
     b: 0.6, diAnnual: 0.42, nglYield: 0.012, waterCut: 0.4,
   },
   {
     name: "RAGSDALE B-7", apiNumber: "42-161-31099", operator: "Big Thicket Energy LLC",
     leaseName: "RAGSDALE", county: "Freestone", status: "PRODUCING", trajectory: "VERTICAL",
-    wellType: "OIL", formation: "Woodbine", months: 120, qiOil: 1450, qiGasPerOil: 1.2, b: 0.2,
+    wellType: "OIL", months: 120, qiOil: 1450, qiGasPerOil: 1.2, b: 0.2,
     diAnnual: 0.19, nglYield: 0.04, waterCut: 3.4,
     downtimeMonths: [55, 56, 88], workoverAt: 57,
   },
   {
     name: "COMANCHE RIDGE 4", apiNumber: "42-289-30772", operator: "Comanche Exploration Co",
     leaseName: "COMANCHE RIDGE", county: "Leon", status: "PRODUCING", trajectory: "DIRECTIONAL",
-    wellType: "OIL", formation: "Buda", months: 60, qiOil: 3900, qiGasPerOil: 2.1, b: 0.7,
+    wellType: "OIL", months: 60, qiOil: 3900, qiGasPerOil: 2.1, b: 0.7,
     diAnnual: 0.55, nglYield: 0.07, waterCut: 2.2,
   },
   {
     name: "TRINITY SANDS 9", apiNumber: "42-289-29841", operator: "Guadalupe Resources LP",
     leaseName: "TRINITY SANDS", county: "Leon", status: "SHUT_IN", trajectory: "VERTICAL",
-    wellType: "OIL", formation: "Georgetown", months: 72, qiOil: 900, qiGasPerOil: 0.9, b: 0.3,
+    wellType: "OIL", months: 72, qiOil: 900, qiGasPerOil: 0.9, b: 0.3,
     diAnnual: 0.24, nglYield: 0.03, waterCut: 4.1,
     downtimeMonths: [66, 67, 68, 69, 70, 71], // shut in for the last 6 months
   },
@@ -134,7 +133,6 @@ async function main() {
         operator: spec.operator,
         leaseName: spec.leaseName,
         fieldName: null,
-        formation: spec.formation,
         state: "TX",
         county: spec.county,
         status: spec.status,

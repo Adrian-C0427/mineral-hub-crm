@@ -15,8 +15,6 @@ export interface AnalyticsDeal {
   stage: string;
   states: string[];
   counties: string[];
-  basins: string[];
-  formations: string[];
   assetTypes: string[];
   operator: string | null;
   askPrice: number | null;
@@ -272,8 +270,6 @@ export function buildMonthlySeries(
 
 export interface Breakdowns {
   counties: { name: string; count: number }[];
-  basins: { name: string; count: number }[];
-  formations: { name: string; count: number }[];
   assetTypes: { name: string; count: number }[];
   perUser: { userId: string; created: number; closed: number; activity: number }[];
 }
@@ -302,8 +298,6 @@ export function buildBreakdowns(deals: AnalyticsDeal[], activities: AnalyticsAct
 
   return {
     counties: topCounts(added, (d) => d.counties),
-    basins: topCounts(added, (d) => d.basins),
-    formations: topCounts(added, (d) => d.formations),
     assetTypes: topCounts(added, (d) => d.assetTypes),
     perUser: Array.from(perUser, ([userId, v]) => ({ userId, ...v })),
   };

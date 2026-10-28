@@ -706,8 +706,6 @@ model Deal {
   askPricePerNma Float?
   askPricePerNra Float?
   assetTypes     String[]
-  basins         String[]
-  formations     String[]
 
   stage                 String    @default("UNDER_CONTRACT") // PipelineStage.key
   // Which pipeline the deal moves through. Null means the org's default
@@ -788,7 +786,7 @@ model Deal {
   ownershipType       String? // e.g. "Mineral", "Royalty", "ORRI", "Working Interest"
   workingInterest     Float? // fraction 0–1
   netRevenueInterest  Float? // fraction 0–1
-  // Property (counties/abstractIds/basins/formations/operator/nra/acreageNma reused)
+  // Property (counties/abstractIds/operator/nra/acreageNma reused)
   surveys             String[]
   wells               String[] // well names / API numbers on the asset
   producingStatus     String? // e.g. "Producing", "Shut-in", "Non-producing"
@@ -1075,8 +1073,6 @@ model BuyBoxCriteria {
   buyer      Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   states     String[]
   counties   String[]
-  basins     String[]
-  formations String[]
   assetTypes String[]
   minAcreage Float?
   maxAcreage Float?
@@ -1486,7 +1482,6 @@ model ResearchPermit {
   spudDate       DateTime?
   completionDate DateTime?
 
-  formation  String?
   field      String?
   totalDepth Float?
 
@@ -1530,7 +1525,6 @@ model ResearchWell {
   operator  String?
   leaseName String?
   fieldName String?
-  formation String?
 
   state  String
   county String
@@ -1901,10 +1895,6 @@ model Opportunity {
   estAcres Float?
   estNma   Float?
   estNra   Float?
-  // Basin / formation tags, as on Deal (suggested from the abstract or county
-  // by services/geoRegions.ts, always editable); carried onto the converted deal.
-  basins     String[] @default([])
-  formations String[] @default([])
 
   source String?
   notes  String?

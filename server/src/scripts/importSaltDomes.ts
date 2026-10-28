@@ -1,5 +1,5 @@
 /**
- * CLI: load East Texas Basin salt dome outlines into gis.salt_domes.
+ * CLI: load East Texas salt dome outlines into gis.salt_domes.
  *
  * Source: BEG Report of Investigations No. 140 — Jackson & Seni (1984),
  * "Atlas of Salt Domes in the East Texas Basin" (public, store.beg.utexas.edu

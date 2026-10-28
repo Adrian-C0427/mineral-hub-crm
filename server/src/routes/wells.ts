@@ -111,7 +111,7 @@ interface WellSummary {
 
 function serializeWell(w: {
   id: string; apiNumber: string | null; name: string; operator: string | null; leaseName: string | null;
-  fieldName: string | null; formation: string | null; state: string; county: string; status: WellStatus;
+  fieldName: string | null; state: string; county: string; status: WellStatus;
   trajectory: WellTrajectory; wellType: string | null; spudDate: Date | null; firstProdDate: Date | null;
   abstractId: string | null; survey: string | null; latitude: number | null; longitude: number | null;
   source: string; createdAt: Date;
@@ -123,7 +123,6 @@ function serializeWell(w: {
     operator: w.operator,
     leaseName: w.leaseName,
     fieldName: w.fieldName,
-    formation: w.formation,
     state: w.state,
     county: w.county,
     status: w.status,
@@ -306,7 +305,7 @@ async function productionSummaries(organizationId: string, wellIds: string[]): P
 /**
  * Free-text well search across every indexed attribute stored on the well.
  * Partial, case-insensitive matches on all text columns (name, identifiers,
- * operator, lease/field/formation, geography, survey/abstract, well type),
+ * operator, lease/field, geography, survey/abstract, well type),
  * plus enum matching so terms like "horizontal" or "shut in" hit the
  * trajectory/status columns. Returns an OR array for the Prisma `where`.
  */
@@ -318,7 +317,6 @@ function buildWellSearch(q: string): Prisma.ResearchWellWhereInput[] {
     { operator: like },
     { leaseName: like },
     { fieldName: like },
-    { formation: like },
     { county: like },
     { state: like },
     { survey: like },
@@ -394,7 +392,7 @@ interface RrcWellRow {
   fid: number; api8: string | null; api10: string | null; well_no: string | null;
   lease_no: string | null; lease_name: string | null; operator: string | null;
   county: string; district: string | null; oil_gas: string | null; type: string | null;
-  status: string | null; field_name: string | null; formations: string[] | null;
+  status: string | null; field_name: string | null;
   spud_date: Date | null; abstract: string | null; survey: string | null;
   lon: number | null; lat: number | null;
   /** The whole row as jsonb — the RRC-refresh columns (profile, status_detail…) without depending on them existing. */
@@ -513,7 +511,7 @@ wellsRouter.post(
     const org = orgId(req);
     const rows = await prisma.$queryRawUnsafe<RrcWellRow[]>(
       `SELECT fid, api8, api10, well_no, lease_no, lease_name, operator, county, district, oil_gas,
-              type, status, field_name, formations, spud_date, abstract, survey,
+              type, status, field_name, spud_date, abstract, survey,
               ST_X(geom) AS lon, ST_Y(geom) AS lat, to_jsonb(w) - 'geom' AS j
          FROM rrc.wells w WHERE ${body.fid !== undefined ? "fid = $1" : "(api8 = $1 OR api10 = $1)"}
         ORDER BY fid LIMIT 1`,
@@ -529,7 +527,6 @@ wellsRouter.post(
       operator: w.operator,
       leaseName: w.lease_name,
       fieldName: w.field_name,
-      formation: w.formations?.[0] ?? null,
       state: "TX",
       county: w.county,
       status: classifyWellStatus(w.status ?? ""),
@@ -608,7 +605,6 @@ export function laResearchWellData(w: LaWellRecord, boreType: string | null) {
     // The well list's second line: whose production this analysis reads.
     leaseName: w.luw ? `Unit production · LUW ${w.luw}` : "No production unit on record",
     fieldName: w.field,
-    formation: null,
     state: "LA",
     county: w.parish,
     status: LA_WELL_STATUS[w.status] ?? "UNKNOWN",
@@ -664,7 +660,7 @@ wellsRouter.post(
 // aggregated in a single call. The Well Analysis page renders this whether the
 // well was opened from the map or found via search, so both workflows show the
 // identical, complete record with no extra imports: identity, status/dates,
-// formations, field/reservoir, lease + lease production, operator history
+// field/reservoir, lease + lease production, operator history
 // (current + at-permit-time + per-production-era), every permit, every
 // completion filing, wellbore/lateral geometry, nearby wells and offset
 // operators, plus deep links to the RRC's own viewers.
@@ -675,7 +671,7 @@ wellsRouter.post(
  * renders (no RRC lease/permits/completions — Louisiana has none of those
  * here) plus `unit`: its LUW and the unit's production, labeled as such.
  */
-async function laDossier(well: { id: string; name: string; county: string; state: string; operator: string | null; fieldName: string | null; apiNumber: string | null; abstractId: string | null; survey: string | null; latitude: number | null; longitude: number | null; wellType: string | null; status: WellStatus; spudDate: Date | null; formation: string | null; sourceRef: string | null }) {
+async function laDossier(well: { id: string; name: string; county: string; state: string; operator: string | null; fieldName: string | null; apiNumber: string | null; abstractId: string | null; survey: string | null; latitude: number | null; longitude: number | null; wellType: string | null; status: WellStatus; spudDate: Date | null; sourceRef: string | null }) {
   const serial = Number(well.sourceRef);
   const fid = Number.isInteger(serial) && serial > 0 ? laWellFid(serial) : null;
   const [w] = fid !== null && sonrisWellsAvailable() ? await prisma.$queryRawUnsafe<LaWellRecord[]>(LA_WELL_SQL.detail, fid) : [];
@@ -711,7 +707,6 @@ async function laDossier(well: { id: string; name: string; county: string; state
       plugDate: null,
       lastProd: ymText(unit?.lastMonth ?? null),
     },
-    formations: well.formation ? [well.formation] : [],
     field: { fieldNo: w?.fieldId ?? null, fieldName: w?.field ?? well.fieldName, reservoirs: [] },
     lease: null,
     unit: w?.luw ? {
@@ -763,7 +758,7 @@ wellsRouter.get(
     const rrcRows = fid !== null || api8Guess.length === 8
       ? await prisma.$queryRawUnsafe<(RrcWellRow & { operator_no: string | null; field_no: string | null; well_id: string | null; symbol: string | null; category: string | null; plug_date: Date | null; cum_oil: number | null; cum_gas: number | null; last_prod: string | null })[]>(
           `SELECT fid, api8, api10, well_no, well_id, symbol, type, status, category, county, district,
-                  lease_no, lease_name, operator, operator_no, field_no, field_name, oil_gas, formations,
+                  lease_no, lease_name, operator, operator_no, field_no, field_name, oil_gas,
                   spud_date, plug_date, cum_oil, cum_gas, last_prod, abstract, survey,
                   ST_X(geom) AS lon, ST_Y(geom) AS lat, to_jsonb(w) - 'geom' AS j
              FROM rrc.wells w WHERE ${fid !== null ? "fid = $1" : "(api8 = $1 OR api10 = '42' || $1)"}
@@ -860,7 +855,6 @@ wellsRouter.get(
       },
       history: refresh?.history ?? [],
       sourceFiles: refresh?.sourceFiles ?? [],
-      formations: rw?.formations ?? (well.formation ? [well.formation] : []),
       field: {
         fieldNo: rw?.field_no ?? null, fieldName: rw?.field_name ?? well.fieldName,
         reservoirs: fieldRows.map((f) => ({ district: f.district, fieldNo: f.field_no, name: f.name, type: f.type })),
@@ -935,7 +929,6 @@ const wellBodySchema = z.object({
   operator: z.string().trim().max(200).optional().nullable(),
   leaseName: z.string().trim().max(200).optional().nullable(),
   fieldName: z.string().trim().max(200).optional().nullable(),
-  formation: z.string().trim().max(200).optional().nullable(),
   state: z.string().trim().length(2).transform((s) => s.toUpperCase()),
   county: z.string().trim().min(1).max(100),
   status: z.enum(WELL_STATUSES).optional(),
@@ -1259,7 +1252,6 @@ const IMPORT_FIELDS = [
   { key: "status", label: "Well Status", required: false },
   { key: "trajectory", label: "Trajectory", required: false },
   { key: "fieldName", label: "Field", required: false },
-  { key: "formation", label: "Formation", required: false },
   { key: "latitude", label: "Latitude", required: false },
   { key: "longitude", label: "Longitude", required: false },
 ] as const;
@@ -1282,7 +1274,6 @@ const HEADER_GUESSES: [RegExp, ImportField][] = [
   [/status/i, "status"],
   [/traj|drill.*type|hor|vert/i, "trajectory"],
   [/field/i, "fieldName"],
-  [/formation|reservoir/i, "formation"],
   [/lat/i, "latitude"],
   [/lon|lng/i, "longitude"],
 ];
@@ -1403,7 +1394,6 @@ wellsRouter.post(
           operator: get(row, "operator") || null,
           leaseName: get(row, "leaseName") || null,
           fieldName: get(row, "fieldName") || null,
-          formation: get(row, "formation") || null,
           state,
           county: rowCounty,
           status: classifyWellStatus(get(row, "status")),

@@ -274,8 +274,6 @@ const createSchema = z.object({
   askPrice: z.number().nullish(),
   ourPrice: z.number().nullish(),
   assetTypes: z.array(z.string().max(200)).max(500).optional(),
-  basins: z.array(z.string().max(200)).max(500).optional(),
-  formations: z.array(z.string().max(200)).max(500).optional(),
   dateUnderContract: dateField,
   originalClosingDate: dateField,
   estimatedClosingCosts: z.number().nullish(),
@@ -390,8 +388,6 @@ dealsRouter.post(
           askPricePerNra: data.askPricePerNra ?? null,
           daysToClose: data.daysToClose ?? null,
           assetTypes: data.assetTypes ?? [],
-          basins: data.basins ?? [],
-          formations: data.formations ?? [],
           dateUnderContract: toDate(data.dateUnderContract) ?? null,
           originalClosingDate: toDate(data.originalClosingDate) ?? null,
           closingBaselineDate: toDate(data.originalClosingDate) ?? null, // the +15 baseline (domain/dates)
@@ -749,7 +745,7 @@ dealsRouter.post(
 
 function emptyBox() {
   return {
-    states: [], counties: [], basins: [], formations: [], assetTypes: [],
+    states: [], counties: [], assetTypes: [],
     minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
   };
 }
@@ -824,8 +820,6 @@ const updateSchema = z.object({
   askPrice: z.number().nullish(),
   ourPrice: z.number().nullish(),
   assetTypes: z.array(z.string().max(200)).max(500).optional(),
-  basins: z.array(z.string().max(200)).max(500).optional(),
-  formations: z.array(z.string().max(200)).max(500).optional(),
   dateUnderContract: dateField,
   originalClosingDate: dateField,
   findBuyerByDateOverride: dateField,
@@ -1009,7 +1003,7 @@ dealsRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const patch: Record<string, unknown> = {};
-    for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "rrc", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...PRICING_KEYS, ...ASSET_SCALAR_KEYS] as const) {
+    for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "rrc", "askPrice", "ourPrice", "assetTypes", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...PRICING_KEYS, ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
     for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "buyerClosingDate", "acquisitionDate", "leaseEffectiveDate", "leaseExpirationDate"] as const) {

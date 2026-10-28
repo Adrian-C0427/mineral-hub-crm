@@ -42,8 +42,6 @@ export const IMPORT_FIELDS = [
   { key: "relationshipStatus", label: "Relationship (Hot/Warm/Cold)" },
   { key: "states", label: "States (buy box)" },
   { key: "counties", label: "Counties (buy box)" },
-  { key: "basins", label: "Basins (buy box)" },
-  { key: "formations", label: "Formations (buy box)" },
   { key: "assetTypes", label: "Asset Types (buy box)" },
   { key: "minAcreage", label: "Min Acreage" },
   { key: "maxAcreage", label: "Max Acreage" },
@@ -52,7 +50,7 @@ export const IMPORT_FIELDS = [
   { key: "notes", label: "Notes" },
 ] as const;
 
-const ARRAY_FIELDS = new Set(["states", "counties", "basins", "formations", "assetTypes"]);
+const ARRAY_FIELDS = new Set(["states", "counties", "assetTypes"]);
 const NUMBER_FIELDS = new Set(["minAcreage", "maxAcreage", "minPrice", "maxPrice"]);
 
 function guessMapping(headers: string[]): Record<string, string> {
@@ -100,7 +98,7 @@ function buildBuyer(row: Record<string, string>, mapping: Record<string, string>
     return header ? (row[header] ?? "").trim() : "";
   };
   const buyBox: Record<string, unknown> = {
-    states: [], counties: [], basins: [], formations: [], assetTypes: [],
+    states: [], counties: [], assetTypes: [],
     minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
   };
   for (const f of ARRAY_FIELDS) if (mapping[f]) buyBox[f] = toArray(get(f));

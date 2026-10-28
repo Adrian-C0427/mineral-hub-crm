@@ -470,7 +470,7 @@ interface RrcWellRow {
   fid: number; api8: string | null; api10: string | null; well_no: string | null;
   lease_no: string | null; lease_name: string | null; operator: string | null;
   county: string; district: string | null; oil_gas: string | null; type: string | null;
-  status: string | null; field_name: string | null; formations: string[] | null;
+  status: string | null; field_name: string | null;
   spud_date: Date | null; abstract: string | null; survey: string | null;
   lon: number | null; lat: number | null;
   /** Refreshed wellbore profile (rrc.wells.profile), when the RRC refresh has run. */
@@ -567,7 +567,7 @@ async function loadWells(db: Db, clock: Clock, rng: Rng, log: (m: string) => voi
       const rows = await db.$queryRawUnsafe<RrcWellRow[]>(
         `WITH c AS (
            SELECT fid, api8, api10, well_no, lease_no, lease_name, operator, county, district, oil_gas,
-                  type, status, field_name, formations, spud_date, abstract, survey,
+                  type, status, field_name, spud_date, abstract, survey,
                   ST_X(geom) AS lon, ST_Y(geom) AS lat, to_jsonb(w) ->> 'profile' AS profile
              FROM rrc.wells w
             WHERE upper(county) = upper($1) AND lease_no IS NOT NULL AND district IS NOT NULL
@@ -598,7 +598,6 @@ async function loadWells(db: Db, clock: Clock, rng: Rng, log: (m: string) => voi
             operator: w.operator,
             leaseName: w.lease_name,
             fieldName: w.field_name,
-            formation: w.formations?.[0] ?? null,
             state: "TX",
             county: w.county,
             status: classifyWellStatus(w.status ?? ""),
@@ -656,7 +655,6 @@ function fallbackWell(fw: FallbackWell, lastYm: string, rng: Rng): SourceWell {
       operator: fw.operator,
       leaseName: fw.lease,
       fieldName: fw.field,
-      formation: fw.formation,
       state: "TX",
       county: fw.county,
       status: "PRODUCING",
@@ -792,7 +790,6 @@ class Planner {
       const email = `${b.first[0].toLowerCase()}${b.last.toLowerCase()}@${b.domain}`;
       const contactName = `${b.first} ${b.last}`;
       this.buyers.push({ id, spec: b, name: b.company, contactName, email, createdAt });
-      const basins = [...new Set(b.regions.flatMap((r) => COUNTIES.filter((c) => c.region === r).flatMap((c) => c.basins)))];
       this.p.buyers.push({
         id, organizationId: this.orgId, name: b.company, companyName: b.company, normalizedCompany: normalizeCompany(b.company),
         contactFirstName: b.first, contactLastName: b.last, contactName, email, phone: this.phone(b.areaCode), website: `www.${b.domain}`,
@@ -802,7 +799,7 @@ class Planner {
         ...(b.portalLead ? { source: "portal", portalSubmittedAt: createdAt } : {}),
       });
       this.p.buyBoxes.push({
-        id: newId(), buyerId: id, states: ["TX"], counties: b.counties, basins, formations: b.formations, assetTypes: b.assetTypes,
+        id: newId(), buyerId: id, states: ["TX"], counties: b.counties, assetTypes: b.assetTypes,
         minAcreage: b.minNma, maxAcreage: b.maxNma, minPrice: b.minPrice, maxPrice: b.maxPrice,
       });
       const owners = [...new Set([...(b.portalLead ? ["owner"] : []), ACQ_KEYS[i % ACQ_KEYS.length], ...(i % 3 === 0 ? [ACQ_KEYS[(i + 1) % ACQ_KEYS.length]] : [])])];
@@ -907,13 +904,12 @@ class Planner {
     const ask = roundTo(cost * rng.float(1.3, 1.55), 25);
     const ourPrice = roundTo(nma * cost, 100);
     const askPrice = roundTo(nma * ask, 100);
-    const formations = rng.shuffle(info.formations).slice(0, rng.int(1, Math.min(2, info.formations.length)));
     const operator = rng.pick(g.operators);
     let name = `${shortSurvey(abstract.survey)} ${interest.label} — ${info.name} Co.`;
     for (let n = 2; this.usedNames.has(name); n++) name = `${shortSurvey(abstract.survey)} ${interest.label} (Tract ${n}) — ${info.name} Co.`;
     this.usedNames.add(name);
     const closingCosts = Math.min(7500, roundTo(900 + ourPrice * 0.01, 50));
-    return { info, abstract, interest, gross, nma, nra, royalty, cost, ask, ourPrice, askPrice, formations, operator, name, closingCosts };
+    return { info, abstract, interest, gross, nma, nra, royalty, cost, ask, ourPrice, askPrice, operator, name, closingCosts };
   }
 
   dealNotes(t: ReturnType<Planner["tract"]>): string {
@@ -1053,8 +1049,8 @@ class Planner {
         id, organizationId: this.orgId, pipelineId: null, name: t.name, sellerNames: [], recordType: "OPPORTUNITY", assetMode: null,
         counties: [info.name], state: "TX", states: ["TX"], acreageNma: t.nma, nra: t.nra, abstractIds: [t.abstract.id],
         surveys: [t.abstract.survey], operator: t.operator, askPrice: t.askPrice, ourPrice: t.ourPrice,
-        ourCostPerNma: t.cost, askPricePerNma: t.ask, daysToClose, assetTypes: [t.interest.type], basins: info.basins,
-        formations: t.formations, royaltyRate: t.royalty, stage,
+        ourCostPerNma: t.cost, askPricePerNma: t.ask, daysToClose, assetTypes: [t.interest.type],
+        royaltyRate: t.royalty, stage,
         currentStageEnteredAt: stageTimes[stage], deadReason: spec.deadReason ?? null,
         dateUnderContract, originalClosingDate, closedDate: closedAt ? clock.dayOf(closedAt) : null,
         relationshipOwnerId: owner.id, estimatedClosingCosts: t.closingCosts, notes: this.dealNotes(t),
@@ -1400,7 +1396,7 @@ class Planner {
       this.p.deals.push({
         id, organizationId: this.orgId, pipelineId: null, name: t.name, sellerNames: [], recordType: "OWNED_ASSET", assetMode: s.mode,
         counties: [info.name], state: "TX", states: ["TX"], acreageNma: t.nma, nra: t.nra, abstractIds: [t.abstract.id], operator: t.operator,
-        askPrice: s.mode === "SELL" ? ref.askPrice : null, ourPrice: purchasePrice, assetTypes: [t.interest.type], basins: info.basins, formations: t.formations,
+        askPrice: s.mode === "SELL" ? ref.askPrice : null, ourPrice: purchasePrice, assetTypes: [t.interest.type],
         stage: s.stage, currentStageEnteredAt: stageTimes[s.stage], relationshipOwnerId: owner.id,
         acquisitionDate: clock.dayOf(acquiredAt), purchasePrice, bookValue: purchasePrice, currentValue: roundTo(purchasePrice * rng.float(1.08, 1.45), 1000),
         ownershipStatus: s.status, ownershipType: t.interest.type === "MI" ? "Mineral" : t.interest.type === "ORRI" ? "ORRI" : "Royalty", workingInterest: 0, netRevenueInterest: nri,
@@ -1788,7 +1784,7 @@ class Planner {
     const buyer = (name: string) => this.buyers.find((b) => b.name === name)?.name ?? null;
     const TIERS: { region: Region; counties: string[]; terminals: string[]; aggregators: string[]; distributors: string[]; feeders: string[]; oneTime: string[] }[] = [
       { region: "EAST", counties: ["Leon", "Robertson", "Freestone", "Madison", "Grimes", "Brazos", "Houston", "Anderson"],
-        terminals: ["Trinity Basin Minerals", "Post Oak Mineral Holdings"], aggregators: ["Navasota Valley Minerals"],
+        terminals: ["Trinity River Minerals", "Post Oak Mineral Holdings"], aggregators: ["Navasota Valley Minerals"],
         distributors: ["Cypress Bayou Mineral Co.", "Blackland Prairie Royalties", "Brushy Creek Mineral Partners"], feeders: ["Big Thicket Royalty"], oneTime: ["Whitetail Ridge Royalty"] },
       { region: "EAGLE_FORD", counties: ["Karnes", "Gonzales", "La Salle", "Dimmit"],
         terminals: ["Ironwood Royalty Holdings", "Post Oak Mineral Holdings"], aggregators: ["Mesquite Flats Minerals"],

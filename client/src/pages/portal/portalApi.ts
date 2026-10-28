@@ -16,8 +16,8 @@ export interface PortalOrg {
 }
 export interface PortalDeal {
   slug: string | null; name: string; summary: string | null; featured: boolean;
-  counties: string[]; states: string[]; abstractIds: string[]; basins: string[];
-  formations: string[]; assetTypes: string[]; surveys: string[];
+  counties: string[]; states: string[]; abstractIds: string[];
+  assetTypes: string[]; surveys: string[];
   nra: number | null; acreageNma: number | null; operator: string | null; rrc: string | null;
   wells: string[]; producingStatus: string | null;
   askPrice: number | null; listedAt: string;

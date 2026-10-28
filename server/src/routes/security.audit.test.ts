@@ -31,7 +31,7 @@ describe("buyer import dedup", () => {
     // Promise.all, so every row's membership check ran before any row had been
     // recorded and in-file duplicates were never detected at all.
     const out = classifyParsed(
-      rows({ companyName: "Permian Basin Royalties" }, { companyName: "Permian Basin Royalties" }),
+      rows({ companyName: "Permian Royalty Partners" }, { companyName: "Permian Royalty Partners" }),
       new Set(),
       new Set(),
     );
@@ -381,7 +381,7 @@ describe("AI prompt fencing", () => {
   });
 
   it("leaves ordinary record text untouched", () => {
-    const body = "- Name: Jane Doe\n- Company: Permian Basin Royalties, LLC";
+    const body = "- Name: Jane Doe\n- Company: Permian Royalty Partners, LLC";
     expect(fence("BUYER", body)).toContain(body);
   });
 });

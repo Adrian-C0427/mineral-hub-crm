@@ -1,6 +1,6 @@
 # RRC statewide bulk-data pipeline
 
-Fills operator / lease / production-join / formation gaps in the county well
+Fills operator / lease / production-join gaps in the county well
 layers (`client/public/data/{county}-wells.geojson`) from the Texas Railroad
 Commission's statewide bulk datasets. This is how the 2026-07 enrichment of
 Leon + Freestone was produced; adding a county or refreshing from newer RRC

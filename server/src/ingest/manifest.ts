@@ -45,7 +45,7 @@ export const DATASETS: DatasetSpec[] = [
     phase: 1, required: true,
     pageLinkText: "Full Wellbore",
     target: "rrc.wells, rrc.wellbores",
-    populates: "Header (API, well name/no, type), Wellbore, Formations, Plug date, Completion",
+    populates: "Header (API, well name/no, type), Wellbore, Plug date, Completion",
     parser: "tools/rrc/extract_dbf900.py + parse_dbf900.py",
     countyScoped: true,
   },

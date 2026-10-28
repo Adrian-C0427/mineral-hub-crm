@@ -4,7 +4,6 @@ import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { GeoFields } from "./GeoFields";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { GeoTagFields } from "./GeoTagFields";
 import type { DealSummary } from "../types";
 import { MoneyInput } from "./MoneyInput";
 import { DateField } from "./DateField";
@@ -75,8 +74,6 @@ export function NewDealModal({ onClose, onCreated, pipelineId }: {
   };
   const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
-  const [basins, setBasins] = useState<string[]>([]);
-  const [formations, setFormations] = useState<string[]>([]);
   const [assetTypes, setAssetTypes] = useState<string[]>([]);
   const [abstractIds, setAbstractIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +130,7 @@ export function NewDealModal({ onClose, onCreated, pipelineId }: {
         name: f.name.trim(),
         pipelineId: pipelineId ?? null,
         states, state: states[0] ?? null,
-        counties, basins, formations, assetTypes, abstractIds,
+        counties, assetTypes, abstractIds,
         operator: f.operator || null,
         rrc: f.rrc || null,
         acreageNma: numOrNull(f.acreageNma),
@@ -221,9 +218,6 @@ export function NewDealModal({ onClose, onCreated, pipelineId }: {
                   abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
                   labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
                 />
-                {/* Basin / Formation: suggested (and filled in while untouched) from the
-                    abstracts' footprint or the county — see components/GeoTagFields. */}
-                <GeoTagFields autoFill basins={basins} onBasinsChange={setBasins} formations={formations} onFormationsChange={setFormations} abstractIds={abstractIds} counties={counties} states={states} />
                 <div className="field"><label title="Operators active in the selected state and county">Operator</label>
                   <OperatorSelect states={states} counties={counties} value={f.operator} onChange={(v) => setF((p) => ({ ...p, operator: v }))} />
                 </div>

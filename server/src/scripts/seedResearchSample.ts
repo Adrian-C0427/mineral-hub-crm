@@ -31,7 +31,7 @@ const COUNTIES = [
 
 const BUYERS = [
   "Blackrock Minerals LLC", "Apex Royalty Partners LP", "Lone Star Mineral Holdings LLC",
-  "Brazos Basin Minerals Inc", "Cedar Creek Royalty Co", "Permian Legacy Minerals LLC",
+  "Brazos Valley Minerals Inc", "Cedar Creek Royalty Co", "Permian Legacy Minerals LLC",
   "Heritage Mineral Group LP", "Trinity River Minerals LLC", "Sabine Royalty Ventures",
   "Wildcat Mineral Acquisitions LLC",
 ];
@@ -157,7 +157,6 @@ async function main() {
           activityDate: date,
           filedDate: date,
           approvedDate: approved ? new Date(date.getTime() + Math.floor(rnd() * 20) * DAY) : null,
-          formation: chance(0.6) ? pick(["Eagle Ford", "Austin Chalk", "Buda", "Woodbine", "Wolfcamp", "Bone Spring"]) : null,
           totalDepth: Math.round(6000 + rnd() * 8000),
           abstractId: chance(0.5) ? `A-${100 + Math.floor(rnd() * 400)}` : null,
           survey: chance(0.5) ? pick(SURVEYS) : null,

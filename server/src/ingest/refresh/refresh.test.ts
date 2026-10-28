@@ -146,7 +146,7 @@ describe("abstract polygons", () => {
 describe("wellbores", () => {
   const leon = { code: "289", name: "Leon" };
   const identity = { apply: (lon: number, lat: number): [number, number] => [lon + 0.0001, lat + 0.0001], mismatchFt: () => 0, inliers: 0, total: 0, residualFt: { p50: 0, p90: 0 } };
-  const ctx: WellContext = { ewa: new Map(), permits: new Map(), acreage: new Map(), uic: new Map(), formations: new Map(), dbfPlug: new Map(), production: new Map(), prodNewestYm: "202607", asOf: "20261018" };
+  const ctx: WellContext = { ewa: new Map(), permits: new Map(), acreage: new Map(), uic: new Map(), dbfPlug: new Map(), production: new Map(), prodNewestYm: "202607", asOf: "20261018" };
   const surf = { rec: { SURFACE_ID: "100", SYMNUM: "86", API: "28932181" }, county: leon, lonLat83: [-96.238143, 31.234578] as [number, number] };
 
   it("builds approximate surface → bottom-hole paths; vertical holes get none; neighbor-county bottoms come from RRC's line end", () => {

@@ -2,8 +2,7 @@
  * Mineral Asset selectors — the module-specific vocab (ownership, producing
  * and lease status) shared by the Create Asset form, the asset page and the
  * portfolio list so every screen offers the same choices. Deal-shared vocab
- * (asset types, basins, formations, royalty rates) lives in lib/options.ts and
- * lib/royalty.ts.
+ * (asset types, royalty rates) lives in lib/options.ts and lib/royalty.ts.
  */
 export const OWNERSHIP_TYPES = ["Mineral", "Royalty", "Overriding Royalty (ORRI)", "Working Interest", "NPRI", "Leasehold"];
 export const OWNERSHIP_STATUSES = ["Active", "Leased", "Held by Production", "Encumbered", "Non-producing"];
