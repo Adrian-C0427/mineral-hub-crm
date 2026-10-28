@@ -24,6 +24,13 @@ describe("integration secret encryption", () => {
     expect(() => decryptSecret(parts.join(":"))).toThrow();
   });
 
+  it("rejects a truncated auth tag (GCM would otherwise accept a short prefix)", () => {
+    const enc = encryptSecret("topsecret");
+    const parts = enc.split(":");
+    parts[3] = Buffer.from(parts[3], "base64").subarray(0, 4).toString("base64");
+    expect(() => decryptSecret(parts.join(":"))).toThrow("Malformed secret payload");
+  });
+
   it("masks all but the last 4 characters", () => {
     expect(secretHint("sk-ant-abcdef1234")).toBe("…1234");
     expect(secretHint("abc")).toBe("…");
