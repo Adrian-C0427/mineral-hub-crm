@@ -16,7 +16,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { sendEmail } from "../services/email.js";
 import { demoLoginConfig } from "../services/demo.js";
 import {
-  generateSecret, verifyTotp, matchTotpStep, otpauthUri, generateRecoveryCodes, hashRecoveryCode,
+  generateSecret, matchTotpStep, otpauthUri, generateRecoveryCodes, hashRecoveryCode,
 } from "../domain/totp.js";
 import {
   getProvider, enabledProviders, buildAuthorizeUrl, exchangeCode, fetchProfile,
@@ -102,10 +102,23 @@ function issueSession(res: import("express").Response, user: { id: string; name:
 // services/secrets). Rows enrolled before this hardening hold base32 plaintext
 // (which never contains ":"), so the ciphertext prefix disambiguates —
 // legacy enrollments keep verifying and are re-encrypted on their next enroll.
+// A sealed secret neither key can open (e.g. INTEGRATION_SECRET_KEY_PREVIOUS
+// removed too early) fails closed: no TOTP code matches it, so the account
+// signs in with a recovery code and re-enrolls. The ciphertext itself is never
+// used as the secret — anyone who read the row could then mint codes.
 const sealTotpSecret = (secret: string): string => encryptSecret(secret);
-function revealTotpSecret(stored: string): string {
+function revealTotpSecret(stored: string): string | null {
   if (!isSealed(stored)) return stored; // legacy plaintext row
-  try { return decryptSecret(stored); } catch { return stored; }
+  try { return decryptSecret(stored); } catch {
+    console.error("[2fa] a stored TOTP secret could not be decrypted with the configured keys; the user must re-enroll.");
+    return null;
+  }
+}
+
+/** The time step a code matches against a stored TOTP secret, or null (no secret, unreadable, or no match). */
+function storedTotpStep(stored: string | null, code: string): number | null {
+  const secret = stored ? revealTotpSecret(stored) : null;
+  return secret ? matchTotpStep(secret, code) : null;
 }
 
 /**
@@ -146,7 +159,7 @@ async function verifySecondFactor(user: { id: string; totpSecret: string | null;
     throw new HttpError(429, "Too many verification attempts for this account. Try again later.");
   }
   let ok = false;
-  const step = user.totpSecret ? matchTotpStep(revealTotpSecret(user.totpSecret), code) : null;
+  const step = storedTotpStep(user.totpSecret, code);
   if (step !== null) {
     const claimed = await prisma.user.updateMany({
       where: { id: user.id, OR: [{ totpLastUsedStep: null }, { totpLastUsedStep: { lt: step } }] },
@@ -792,7 +805,7 @@ authRouter.post(
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { totpSecret: true, totpEnabled: true } });
     if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled.");
     if (!user?.totpSecret) throw new HttpError(400, "Start setup first (no pending secret).");
-    const step = matchTotpStep(revealTotpSecret(user.totpSecret), code);
+    const step = storedTotpStep(user.totpSecret, code);
     if (step === null) throw new HttpError(400, "That code is incorrect or expired. Try the current code from your authenticator app.");
 
     const { codes, hashes } = generateRecoveryCodes();
@@ -829,7 +842,7 @@ authRouter.post(
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { id: true, totpSecret: true, totpEnabled: true, totpRecoveryCodes: true } });
     if (!user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is not enabled.");
-    if (!user.totpSecret || !verifyTotp(revealTotpSecret(user.totpSecret), code)) throw new HttpError(400, "Enter a current code from your authenticator app.");
+    if (storedTotpStep(user.totpSecret, code) === null) throw new HttpError(400, "Enter a current code from your authenticator app.");
     const { codes, hashes } = generateRecoveryCodes();
     await prisma.user.update({ where: { id: req.user!.id }, data: { totpRecoveryCodes: hashes } });
     res.json({ recoveryCodes: codes });
