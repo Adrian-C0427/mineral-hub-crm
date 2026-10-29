@@ -767,14 +767,21 @@ export function MapView() {
     vis("heat-hotspots-label", anyHeat && h.hotspots);
   }
 
-  function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
-  useEffect(loadDeals, [statusFilter]);
+  // Deals, assets and opportunities need View deals as well as the map; without
+  // it the map still shows wells, abstracts and imported tracts.
+  const viewDeals = can("viewDeals");
+  function loadDeals() {
+    if (!viewDeals) { setDeals([]); return; }
+    const qs = new URLSearchParams(); qs.set("status", statusFilter);
+    api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals).catch(() => setDeals([]));
+  }
+  useEffect(loadDeals, [statusFilter, viewDeals]);
   // Owned (HOLD) mineral assets: not deals, so the deal-status filter doesn't apply.
-  useEffect(() => { api.get<MapAsset[]>("/map/assets").then(setAssets).catch(() => setAssets([])); }, []);
+  useEffect(() => { if (viewDeals) api.get<MapAsset[]>("/map/assets").then(setAssets).catch(() => setAssets([])); }, [viewDeals]);
   // Opportunities come from the opportunity records themselves (no map copy):
   // a fresh list every time the map opens, so new, edited, moved, converted or
   // deleted prospects are reflected without any extra bookkeeping.
-  useEffect(() => { api.get<MapOpp[]>("/map/opportunities").then(setOpps).catch(() => setOpps([])); }, []);
+  useEffect(() => { if (viewDeals) api.get<MapOpp[]>("/map/opportunities").then(setOpps).catch(() => setOpps([])); }, [viewDeals]);
   useEffect(() => {
     // Merge every county's monthly production. Keys are og|district|leaseNo and
     // RRC lease numbers are unique within a district, so counties don't collide.

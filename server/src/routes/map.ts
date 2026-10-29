@@ -18,6 +18,8 @@ import { env } from "../config.js";
 export const mapRouter = Router();
 // viewMap is in every role's defaults; the gate only bites when an org
 // explicitly removes it — which previously only hid the UI, not this data.
+// Routes that return the org's deals, assets or opportunities (prices, buyers,
+// acreage) also need viewDeals: viewMap alone is the map, not the pipeline.
 mapRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
 
 // "Active" = any non-terminal stage (robust to custom stages).
@@ -103,6 +105,7 @@ mapRouter.get(
  */
 mapRouter.get(
   "/deals",
+  requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const f = filterSchema.parse(req.query);
 
@@ -162,6 +165,7 @@ mapRouter.get(
  */
 mapRouter.get(
   "/assets",
+  requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const assets = await prisma.deal.findMany({
       where: {
@@ -183,6 +187,7 @@ mapRouter.get(
 /** Distinct filter values present on the org's abstract-linked deals (for filter menus). */
 mapRouter.get(
   "/filters",
+  requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const deals = await prisma.deal.findMany({
       where: { organizationId: orgId(req), abstractIds: { isEmpty: false } },
