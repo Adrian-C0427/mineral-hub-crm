@@ -3,7 +3,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { escapeLike, rankRefEntries, MIN_SEARCH_CHARS, type RefEntry } from "../domain/search.js";
 import { abstractNumber, countyLabel, countyStateLabel, isSectionLabel, rankAbstracts, sectionLabel, surveyLabel } from "../domain/abstractLabel.js";
 import { countyKey, countyNoun, countyScopePredicate, countySearchTerm, GIS_STATES, louisianaParishNames, parsePlssQuery, texasCountyNames } from "../domain/gisRegion.js";
@@ -418,7 +418,8 @@ export function clearGisCaches(): void {
 /**
  * Unified map search: one query, every entity the map knows about — counties,
  * abstracts, surveys, wells (API #, well #, lease name/number), operators,
- * fields, and the org's deals & mineral assets. Each group
+ * fields, and the org's deals & mineral assets (with View deals only — the
+ * map alone is not the pipeline). Each group
  * is ranked by trigram similarity and capped; the client interleaves groups.
  * Result rows carry an `action` payload the client uses to zoom/highlight or
  * apply a filter.
@@ -535,12 +536,14 @@ gisRouter.get(
       // cannot remain per-request aggregations.
       referenceIndex(),
       // The org's deals and mineral assets, matched on name.
-      prisma.deal.findMany({
-        where: { organizationId: orgId(req), name: { contains: q, mode: "insensitive" } },
-        select: { id: true, name: true, recordType: true, stage: true, counties: true, abstractIds: true },
-        orderBy: { updatedAt: "desc" },
-        take: 100,
-      }),
+      hasPermission(req, "viewDeals")
+        ? prisma.deal.findMany({
+          where: { organizationId: orgId(req), name: { contains: q, mode: "insensitive" } },
+          select: { id: true, name: true, recordType: true, stage: true, counties: true, abstractIds: true },
+          orderBy: { updatedAt: "desc" },
+          take: 100,
+        })
+        : Promise.resolve([]),
     ]);
 
     res.json({

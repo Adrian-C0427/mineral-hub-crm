@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { TERMINAL_STAGE_KEYS, OPPORTUNITY_TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 import { isAbstractId, normalizeAbstractId } from "../domain/opportunities.js";
@@ -250,11 +250,23 @@ async function orgDealId(req: AuthedRequest, raw: unknown): Promise<string | nul
   return deal.id;
 }
 
+/**
+ * Which deal a tract belongs to is pipeline data: without View deals a caller
+ * gets the tracts themselves but no deal ids or names, and cannot scope a list
+ * to one deal (?dealId= is the deal map, which needs View deals anyway).
+ */
+function tractDealAccess(req: AuthedRequest, dealId: string | undefined): boolean {
+  const seesDeals = hasPermission(req, "viewDeals");
+  if (dealId && !seesDeals) throw new HttpError(403, "You do not have permission to perform this action");
+  return seesDeals;
+}
+
 /** Every imported tract as one FeatureCollection (map source + panel detail). */
 mapRouter.get(
   "/tracts",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { dealId } = dealScopeSchema.parse(req.query);
+    const seesDeals = tractDealAccess(req, dealId);
     // Imported tracts are map reference data: the demo reads its reference org's.
     // Tracts linked to one of THAT org's deals mark what it is pursuing, so the
     // demo never sees them at all — only the org's general (unlinked) tracts,
@@ -266,6 +278,7 @@ mapRouter.get(
       include: { deal: { select: { id: true, name: true } } },
     });
     if (fromReference) for (const r of rows) { r.deal = null; r.sourceFile = REFERENCE_TRACT_SOURCE; }
+    if (!seesDeals) for (const r of rows) r.deal = null;
     res.json({
       type: "FeatureCollection",
       features: rows.map((r) => ({
@@ -288,6 +301,7 @@ mapRouter.get(
   "/tracts/imports",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { dealId } = dealScopeSchema.parse(req.query);
+    const seesDeals = tractDealAccess(req, dealId);
     // Demo: same scope as /tracts — the reference org's unlinked tracts only.
     const fromReference = req.user!.referenceOrgId != null;
     const groups = await prisma.mapTract.groupBy({
@@ -296,7 +310,7 @@ mapRouter.get(
       _count: { _all: true },
       _min: { createdAt: true },
     });
-    const dealIds = [...new Set(groups.map((g) => g.dealId).filter((v): v is string => !!v))];
+    const dealIds = seesDeals ? [...new Set(groups.map((g) => g.dealId).filter((v): v is string => !!v))] : [];
     const deals = dealIds.length
       ? await prisma.deal.findMany({ where: { id: { in: dealIds }, organizationId: orgId(req) }, select: { id: true, name: true } })
       : [];
@@ -305,7 +319,8 @@ mapRouter.get(
       .map((g) => ({
         importId: g.importId, sourceFile: fromReference ? REFERENCE_TRACT_SOURCE : g.sourceFile, count: g._count._all, createdAt: g._min.createdAt,
         // Reference-org (demo) imports never expose the source org's deal ids.
-        dealId: fromReference ? null : g.dealId, dealName: g.dealId ? dealName.get(g.dealId) ?? null : null,
+        // Without View deals, neither the deal id nor its name.
+        dealId: fromReference || !seesDeals ? null : g.dealId, dealName: g.dealId ? dealName.get(g.dealId) ?? null : null,
       }))
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
   }),

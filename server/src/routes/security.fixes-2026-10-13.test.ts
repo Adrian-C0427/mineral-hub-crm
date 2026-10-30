@@ -406,7 +406,7 @@ describe("upload limit errors are client errors", () => {
 describe("demo map tracts with a reference deal id", () => {
   it("?dealId= can't reopen the reference org's deal-linked tracts", async () => {
     db.results["mapTract.findMany"] = [];
-    await withApp({ org: "org_demo", isDemo: true, permissions: ["viewMap"] }, (app) => app.use("/api/map", mapRouter), async (port) => {
+    await withApp({ org: "org_demo", isDemo: true, permissions: ["viewMap", "viewDeals"] }, (app) => app.use("/api/map", mapRouter), async (port) => {
       await call(port, "GET", "/api/map/tracts?dealId=ref_deal_cuid");
       const where = (db.calls["mapTract.findMany"][0] as { where: Record<string, unknown> }).where;
       expect(where).toEqual({ organizationId: "org_ref", dealId: null, id: { in: [] } });
