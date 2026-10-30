@@ -395,6 +395,24 @@ tfoot td { background: var(--surface-1); border-top: 1px solid var(--line); font
 .ct-rpp .msel-box { height: 28px; min-height: 28px; padding: 0 6px 0 10px; gap: 6px; background: var(--bg); border-color: var(--line); border-radius: var(--radius-sm); }
 .ct-rpp .msel-single-value { font-size: 12.5px; font-weight: 500; }
 
+/* Desktop table cards: the toolbar above the rows and the footer below them
+   are opaque and sit over the scrolling rows, so nothing scrolling under the
+   sticky header shows through at the seams or covers their divider lines (the
+   same fractional-offset rounding as .data-table thead th's top: -1px). The
+   card's background and corner radius carry down to them. The toolbar sits
+   above the sticky header (7) and the selection bar (20) so its Customize
+   view menu still opens over both. Phones lay these out on their own
+   (mobile.css; the Customize view menu is a fixed bottom sheet there). */
+@media not ((max-width: 760px) or ((pointer: coarse) and (max-height: 500px))) {
+  .ct-card > .cv-table { background: inherit; border-radius: inherit; }
+  .ct-card > .cv-table > .cv-toolbar,
+  .ct-card > .cv-table > .ct-foot,
+  .ct-card > .ct-foot { position: relative; background: inherit; }
+  .ct-card > .cv-table > .cv-toolbar { z-index: 30; border-top-left-radius: inherit; border-top-right-radius: inherit; }
+  .ct-card > .cv-table > .ct-foot,
+  .ct-card > .ct-foot { z-index: 4; border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; }
+}
+
 /* ---------------------------------------------------------------------------
    Viewport-height pages (.page-fill): the Pipeline boards and the table list
    pages (Deals, Buyers, Contacts, Mineral assets). The page is exactly the
