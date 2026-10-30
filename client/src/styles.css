@@ -614,7 +614,12 @@ table.data-table {
   font-weight: 500;
   border-bottom-color: var(--line);
   white-space: nowrap;
-  position: sticky; top: 0;
+  /* -1px, not 0: once stuck, the header overlaps its scroll area's top edge by
+     a pixel. At a fractional page offset (browser zoom, display scaling) the
+     two round to different device pixels, and with top: 0 a hairline of the
+     rows scrolling underneath showed above the header. Unscrolled, it sits
+     exactly where it always did. */
+  position: sticky; top: -1px;
 }
 .data-table th.sortable { cursor: pointer; user-select: none; }
 .data-table th.sortable:hover { color: var(--text); }
