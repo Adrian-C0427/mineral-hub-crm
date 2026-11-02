@@ -226,12 +226,6 @@ a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-de
 .dash-task-head h3 { margin: 0; }
 /* Main map: owned (HOLD) mineral asset tag — matches the asset highlight color. */
 .map-asset-badge { color: #7c3aed; background: rgba(139, 92, 246, 0.14); }
-/* "Show tasks for" user filter, pinned to the right of the Tasks header. */
-.dash-task-filter { margin-left: auto; font-size: 12.5px; }
-/* Compact user filter: a slim pill-height control beside the title. */
-.dash-task-filter .msel-box { min-height: 28px; padding: 1px 4px 1px 9px; border-radius: 7px; }
-.dash-task-filter .msel-single-value { font-size: 12px; font-weight: 600; }
-.dash-task-filter .msel-caret-btn { width: 20px; }
 .dash-task-add { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; padding: 0;
   margin-left: 6px; border-radius: 7px; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); }
@@ -529,28 +523,6 @@ input::placeholder, textarea::placeholder { color: var(--ink-placeholder); }
 .dm-info { position: absolute; top: 10px; right: 10px; max-width: 240px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 .dm-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--text-dim); font-size: 13px; background: var(--panel-2); }
 
-/* Integrations hub */
-.integration-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.integration-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--panel-2); display: flex; flex-direction: column; }
-.integration-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-/* Uniform logo chip: a light tile so each brand's own colors read cleanly on
-   the dark UI. Brand logos (img) sit centered; generic providers show a themed
-   glyph or initials. Same footprint for every card = a consistent, tidy grid. */
-.integration-logo {
-  width: 38px; height: 38px; flex: 0 0 38px; border-radius: 7px;
-  background: #fff; border: 1px solid var(--border);
-  color: var(--accent); font-weight: 700; font-size: 13px;
-  display: flex; align-items: center; justify-content: center; overflow: hidden;
-}
-.integration-logo { position: relative; }
-.integration-logo img { width: 24px; height: 24px; object-fit: contain; display: block; }
-/* Brand-mark tiles: the image sits over an initials fallback so a blocked or
-   offline CDN degrades to readable initials instead of a blank white tile. */
-.integration-logo.brand img { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
-.integration-logo-fallback { color: #64748b; font-weight: 700; font-size: 13px; }
-.integration-name { font-weight: 600; }
-.integration-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; flex: 1;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .chip-mini { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
 
 /* Report header block */
