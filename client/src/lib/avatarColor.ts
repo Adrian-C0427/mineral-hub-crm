@@ -43,11 +43,6 @@ export function userAvatarColor(u: { name?: string | null; avatarColor?: string 
 /** A person as the avatar needs them: the display name, the first/last name the initials come from, the saved colour. */
 export interface AvatarUser { id?: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null }
 
-/** Initials from the display name: first letters of its first two words ("Mary Ann Smith" → "MA"). */
-export function initialsOf(name: string | null | undefined): string {
-  return (name ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
-}
-
 /**
  * A USER's initials: first + last name when both are known ("Adrian Campos"
  * → "AC"), else the first and LAST word of the display name (a middle name

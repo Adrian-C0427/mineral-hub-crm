@@ -766,6 +766,7 @@ function ContactImportWizard({ lists, onDone }: { lists: ContactListRow[]; onDon
 // Every exportable contact field — the user picks any combination.
 const EXPORT_COLUMNS: { key: string; label: string; value: (r: ContactRow, lists: ContactListRow[]) => string | number | null }[] = [
   { key: "firstName", label: "First Name", value: (r) => r.firstName },
+  { key: "middleName", label: "Middle Name", value: (r) => r.middleName ?? null },
   { key: "lastName", label: "Last Name", value: (r) => r.lastName },
   { key: "entityName", label: "Company / Entity", value: (r) => r.entityName },
   { key: "type", label: "Type", value: (r) => typeLabel(r.type) },
@@ -788,9 +789,9 @@ const EXPORT_COLUMNS: { key: string; label: string; value: (r: ContactRow, lists
   { key: "mailingState", label: "Mailing State", value: (r) => r.mailingState ?? null },
   { key: "mailingZip", label: "Mailing Zip", value: (r) => r.mailingZip ?? null },
   { key: "preferredContact", label: "Preferred Contact", value: (r) => preferredContactLabel(r.preferredContact) },
-  { key: "middleName", label: "Middle Name", value: (r) => r.middleName ?? null },
 ];
-const DEFAULT_EXPORT_KEYS = ["firstName", "lastName", "entityName", "type", "status", "email", "phone", "counties", "owner"];
+// The name columns read like the import's (First, Middle, Last), so an export re-imports as is.
+const DEFAULT_EXPORT_KEYS = ["firstName", "middleName", "lastName", "entityName", "type", "status", "email", "phone", "counties", "owner"];
 
 function ExportContactsModal({ scope, selected, filtered, lists, all, onClose }: {
   scope: "filtered" | "selected";

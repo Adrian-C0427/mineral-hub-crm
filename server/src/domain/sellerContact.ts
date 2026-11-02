@@ -109,7 +109,7 @@ const lower =(v: string | null | undefined) => (v ?? "").trim().toLowerCase();
 const same = (a: string | null | undefined, b: string | null | undefined) => lower(a) === lower(b);
 /** Middle names agree unless both are given and differ ("Mary Hernandez" is
  *  the same name as "Mary Ann Hernandez"; "Mary Ann" and "Mary Jo" are not). */
-const sameMiddle = (a: string | null | undefined, b: string | null | undefined) => !lower(a) || !lower(b) || same(a, b);
+export const sameMiddle = (a: string | null | undefined, b: string | null | undefined) => !lower(a) || !lower(b) || same(a, b);
 
 /** An entity-only contact is filed under its entity name (firstName = entity,
  *  no last name): its person-name fields read as blank. */
@@ -360,6 +360,47 @@ export function contactSyncFor(access: ContactAccess, patch: Prisma.ContactUpdat
 /** Non-empty contact value, else the seller row's own copy. */
 const pick = <T extends string | null>(c: T | undefined, s: T): T => (c != null && c !== "" ? c : s);
 
+type ContactNameFields = Pick<SellerContactRow, "firstName" | "lastName" | "entityName"> & { middleName?: string | null };
+
+/**
+ * Every name a deal's sellers go by, for the Deals / Mineral Assets search:
+ * the legacy names stored on the deal, then each seller row's person name
+ * (First Middle Last) and entity, read through its linked Contact. Case-
+ * insensitive duplicates are dropped.
+ */
+export function dealSellerNames(
+  stored: readonly string[],
+  sellers: readonly ({ firstName: string | null; middleName: string | null; lastName: string | null; companyName: string | null; trustName: string | null; contact: ContactNameFields | null })[],
+): string[] {
+  const names = [...stored];
+  for (const row of sellers) {
+    const s = overlayContactNames(row, row.contact);
+    names.push(personName(s), s.companyName ?? "", s.trustName ?? "");
+  }
+  const seen = new Set<string>();
+  return names.map((n) => n.trim()).filter((n) => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase()));
+}
+
+/**
+ * The names of a seller row (or an opportunity's seller) with its linked
+ * Contact's names over the row's copy. A person contact's middle name wins
+ * even when blank, so clearing it on the Contact Profile clears it here too;
+ * an entity-only contact leaves the row's person names alone.
+ */
+export function overlayContactNames<S extends { firstName: string | null; middleName?: string | null; lastName: string | null; companyName: string | null }>(
+  s: S, c: ContactNameFields | null | undefined,
+): S {
+  if (!c) return s;
+  const person = contactPersonName(c);
+  return {
+    ...s,
+    firstName: pick(person.firstName, s.firstName),
+    middleName: person.firstName || person.lastName ? person.middleName : s.middleName ?? null,
+    lastName: pick(person.lastName, s.lastName),
+    companyName: pick(c.entityName, s.companyName),
+  };
+}
+
 /**
  * A DealSeller row as the API shows it: the linked Contact's shared fields
  * overlay the row's copy (the Contact is the source of truth), everything
@@ -372,14 +413,7 @@ export function overlayContact<S extends {
   mailingAddress: string | null; mailingCity: string | null; mailingState: string | null; mailingZip: string | null;
 }>(s: S, c: SellerContactRow | null | undefined, view = true): S {
   if (!c) return s;
-  const person = contactPersonName(c);
-  const names = {
-    ...s,
-    firstName: pick(person.firstName, s.firstName),
-    middleName: pick(person.middleName, s.middleName ?? null),
-    lastName: pick(person.lastName, s.lastName),
-    companyName: pick(c.entityName, s.companyName),
-  };
+  const names = overlayContactNames(s, c);
   if (!view) return names;
   return {
     ...names,

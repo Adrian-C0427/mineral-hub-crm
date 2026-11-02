@@ -7,6 +7,7 @@ import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type 
 import { dealStatus } from "../domain/stages.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
 import { personName } from "../domain/contactName.js";
+import { sameMiddle } from "../domain/sellerContact.js";
 import { parse } from "csv-parse/sync";
 import { LIST_LIMIT, MAX_CSV_CHARS } from "../config.js";
 import type { Contact, ContactActivity, ContactList, User } from "@prisma/client";
@@ -782,28 +783,38 @@ async function classifyContactRows(org: string, csv: string, mapping: Record<str
   const { rows } = parseContactsCsv(csv);
   const existing = await prisma.contact.findMany({
     where: { organizationId: org },
-    select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+    select: { id: true, firstName: true, middleName: true, lastName: true, email: true, phone: true },
   });
+  // A name (+ phone) is the same person only when the middle names agree too
+  // (sameMiddle: "John Smith" matches "John A Smith"; "John A" and "John B" are
+  // two people), so each key keeps every middle name seen under it.
+  const nameKey = (c: { firstName: string; lastName: string }) => `${c.firstName.toLowerCase()}|${c.lastName.toLowerCase()}`;
   const byEmail = new Map<string, string>();
-  const byNamePhone = new Map<string, string>();
+  const byNamePhone = new Map<string, { id: string; middleName: string | null }[]>();
   for (const c of existing) {
     if (c.email) byEmail.set(c.email.toLowerCase(), c.id);
-    if (c.phone) byNamePhone.set(`${c.firstName.toLowerCase()}|${c.lastName.toLowerCase()}|${normPhone(c.phone)}`, c.id);
+    if (c.phone) {
+      const k = `${nameKey(c)}|${normPhone(c.phone)}`;
+      byNamePhone.set(k, [...(byNamePhone.get(k) ?? []), { id: c.id, middleName: c.middleName }]);
+    }
   }
-  const seen = new Set<string>();
+  const seen = new Map<string, (string | null)[]>();
   return rows.map((row, index) => {
     const c = buildContact(row, mapping);
     if (!c.firstName || !c.lastName) {
       return { index, status: "Error" as const, reason: "Missing first or last name", contact: c, matchId: null };
     }
     const emailKey = c.email ?? "";
-    const npKey = c.phone ? `${c.firstName.toLowerCase()}|${c.lastName.toLowerCase()}|${normPhone(c.phone)}` : "";
-    const fileKey = emailKey || npKey || `${c.firstName.toLowerCase()}|${c.lastName.toLowerCase()}`;
-    if (seen.has(fileKey)) {
+    const npKey = c.phone ? `${nameKey(c)}|${normPhone(c.phone)}` : "";
+    const fileKey = emailKey || npKey || nameKey(c);
+    const earlier = seen.get(fileKey) ?? [];
+    if (earlier.length && (emailKey || earlier.some((m) => sameMiddle(m, c.middleName)))) {
       return { index, status: "Error" as const, reason: "Duplicate row within this file", contact: c, matchId: null };
     }
-    seen.add(fileKey);
-    const matchId = (emailKey && byEmail.get(emailKey)) || (npKey && byNamePhone.get(npKey)) || null;
+    seen.set(fileKey, [...earlier, c.middleName]);
+    const matchId = (emailKey && byEmail.get(emailKey))
+      || (npKey && byNamePhone.get(npKey)?.find((x) => sameMiddle(x.middleName, c.middleName))?.id)
+      || null;
     if (matchId) return { index, status: "Duplicate" as const, reason: emailKey && byEmail.get(emailKey) ? "Email matches an existing contact" : "Name + phone match an existing contact", contact: c, matchId };
     return { index, status: "New" as const, reason: "", contact: c, matchId: null };
   });

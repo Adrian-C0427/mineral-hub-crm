@@ -9,7 +9,7 @@ import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
 import { syncAskToAcceptedOffer, ASK_SYNCED_EVENT } from "../services/acceptedOfferSync.js";
-import { CONTACT_EDIT_FORBIDDEN, contactPatchFromSellerPatch, contactSyncFor, dealSellerFromInfo, fillContactGeography, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
+import { CONTACT_EDIT_FORBIDDEN, contactPatchFromSellerPatch, contactSyncFor, dealSellerFromInfo, dealSellerNames, fillContactGeography, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
 import { contactName } from "../domain/contactName.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
@@ -186,11 +186,17 @@ dealsRouter.get(
       : {};
     const deals = await prisma.deal.findMany({
       where,
-      include: { ...dealInclude, offers: { select: { id: true, amount: true, status: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } }, ...revenueInclude },
+      include: {
+        ...dealInclude, offers: { select: { id: true, amount: true, status: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } }, ...revenueInclude,
+        // Names only, for the list search (dealSellerNames).
+        sellers: { select: { firstName: true, middleName: true, lastName: true, companyName: true, trustName: true, contact: { select: { firstName: true, middleName: true, lastName: true, entityName: true } } } },
+      },
       orderBy: { createdAt: "desc" },
       take: LIST_LIMIT,
     });
-    res.json(deals.map((d) => serializeDeal(d)));
+    // sellerNames: the search's seller names — the deal's sellers as they read
+    // now (through their contacts), not only the legacy names stored on it.
+    res.json(deals.map(({ sellers, ...d }) => serializeDeal({ ...d, sellerNames: dealSellerNames(d.sellerNames, sellers) })));
   }),
 );
 

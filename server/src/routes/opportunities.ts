@@ -34,7 +34,8 @@ opportunitiesRouter.use(requireAuth, requireOrg);
 type Tx = Prisma.TransactionClient | typeof prisma;
 
 const userSelect = { select: userRefSelect } as const;
-const summaryInclude = { owner: userSelect } as const;
+// The linked contact's names: cards show its current name (domain sellerOf).
+const summaryInclude = { owner: userSelect, contact: { select: { firstName: true, middleName: true, lastName: true, entityName: true } } } as const;
 const detailInclude = {
   owner: userSelect,
   contact: { select: sellerContactSelect },
