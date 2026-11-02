@@ -47,9 +47,9 @@ const ContactDetail = lazy(() => import("./pages/ContactDetail").then((m) => ({ 
 const Opportunity = lazy(() => import("./pages/Opportunity").then((m) => ({ default: m.Opportunity })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
-function Guard({ perm, children }: { perm: string; children: ReactNode }) {
+function Guard({ perm, children }: { perm: string | string[]; children: ReactNode }) {
   const { can } = useAuth();
-  return can(perm) ? <>{children}</> : <Navigate to="/" replace />;
+  return (Array.isArray(perm) ? perm.some(can) : can(perm)) ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 /** Blocking screen shown when the account is flagged mustChangePassword. */
@@ -159,7 +159,7 @@ export function App() {
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="/settings/general" element={<SettingsGeneral />} />
           <Route path="/settings/portal" element={<Guard perm="managePortal"><SettingsPortal /></Guard>} />
-          <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
+          <Route path="/settings/integrations" element={<Guard perm={["manageApiIntegrations", "sendEmail", "manageDocuments"]}><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
           {/* Signed-out-only pages: once signed in they go to the Dashboard, as before. */}
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/reset-password" element={<Navigate to="/" replace />} />

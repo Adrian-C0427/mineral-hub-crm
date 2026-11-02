@@ -34,6 +34,7 @@ import { gisRouter, gisTilesRouter } from "./routes/gis.js";
 import { portalRouter } from "./routes/portal.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { calendarRouter } from "./routes/calendar.js";
+import { accountsRouter } from "./routes/accounts.js";
 
 export function createApp() {
   const app = express();
@@ -121,6 +122,7 @@ export function createApp() {
   // Public OAuth callback (no session) must be matched before the authed router.
   app.use("/api/integrations", integrationsOAuthCallbackRouter);
   app.use("/api/integrations", integrationsRouter);
+  app.use("/api/accounts", accountsRouter);
   app.use("/api/research", researchRouter);
   app.use("/api/wells", wellsRouter);
   app.use("/api/ai", aiRouter);

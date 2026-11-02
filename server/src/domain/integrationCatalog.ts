@@ -12,9 +12,9 @@
  * real work the moment it is connected:
  *  - Resend delivers all outbound email (primary provider; SMTP is fallback).
  *  - Teams receives deal/portal notifications on its webhook.
- *  - Outlook imports inbound buyer replies onto deal timelines.
+ *  - Outlook, OneDrive and Google Drive are connected per team member
+ *    (`personal`, routes/accounts.ts): a mail client and two file managers.
  *  - Outlook Calendar mirrors deal deadlines as calendar events.
- *  - Google Drive / OneDrive import files into the document manager.
  *  - Claude powers deal summaries and outreach drafts.
  *  - HighLevel (LeadConnector) mirrors the org's texting history READ-ONLY
  *    for Reports → SMS performance (services/highlevel/).
@@ -47,6 +47,8 @@ export interface ProviderDef {
   setupUrl?: string;
   /** Whether periodic sync (scheduled re-validation + data pull) applies. */
   syncable?: boolean;
+  /** Connected per team member (routes/accounts.ts), not once for the org. */
+  personal?: boolean;
 }
 
 export const INTEGRATION_CATALOG: ProviderDef[] = [
@@ -62,8 +64,8 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   },
   {
     key: "outlook", name: "Microsoft Outlook / 365", category: "Email & Communication", auth: "oauth", implementation: "oauth",
-    description: "Sync inbound buyer replies from your Outlook inbox — emails from known buyer addresses land on the deal timeline, mark the outreach as answered, and raise a notification. Requires an Entra ID app registration with the Mail.Read scope (the same registration used for Microsoft sign-in).",
-    setupUrl: "https://portal.azure.com", syncable: true,
+    description: "Each team member connects their own Outlook / Microsoft 365 mailbox. Read, reply to and forward email inside the CRM; send from your own address with your Outlook signature (it lands in your Sent Items); attach documents; and keep conversations with contacts, buyers, deals and opportunities on their records. Microsoft Graph with Mail.ReadWrite and Mail.Send.",
+    setupUrl: "https://portal.azure.com", syncable: true, personal: true,
   },
   {
     key: "teams", name: "Microsoft Teams", category: "Email & Communication", auth: "webhook", implementation: "live",
@@ -93,13 +95,13 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   },
   {
     key: "googledrive", name: "Google Drive", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
-    description: "Import documents from Google Drive straight into a deal's document manager — browse or search your Drive from the Documents section and pull files in without downloading them first. Requires the Google Cloud OAuth client with the drive.readonly scope.",
-    setupUrl: "https://console.cloud.google.com/apis/credentials",
+    description: "Each team member connects their own Google Drive: browse, search, upload, organize and preview files (Docs, Sheets and Slides included), and link them to deals, opportunities, contacts, buyers and mineral assets without copying them. Google Drive API, drive scope (Workspace-internal app).",
+    setupUrl: "https://console.cloud.google.com/apis/credentials", syncable: true, personal: true,
   },
   {
     key: "onedrive", name: "Microsoft OneDrive", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
-    description: "Import documents from OneDrive into a deal's document manager via Microsoft Graph (Files.Read). Uses the same Entra ID app registration as Microsoft sign-in.",
-    setupUrl: "https://portal.azure.com",
+    description: "Each team member connects their own OneDrive: browse, search, upload, organize and preview files, and link them to deals, opportunities, contacts, buyers and mineral assets without copying them. Microsoft Graph with Files.ReadWrite (the same Entra ID app registration as Microsoft sign-in).",
+    setupUrl: "https://portal.azure.com", syncable: true, personal: true,
   },
 
   // --- Productivity ---

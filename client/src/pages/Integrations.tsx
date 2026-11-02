@@ -10,6 +10,9 @@ import { fmtDateTime } from "../lib/format";
 import { SettingsLayout } from "../components/SettingsNav";
 import { Segmented, Tag } from "../components/kit";
 import { useHighLevelStatus, HighLevelSummary, HighLevelConnectModal, HighLevelConfigureModal } from "../components/HighLevelIntegration";
+import { ConnectedAccountsSection, TeamConnections } from "../components/ConnectedAccounts";
+import { useConnectedAccounts } from "../lib/connectedAccounts";
+import { useAuth } from "../auth/AuthContext";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
 // source of truth for which providers exist, how they authenticate, and how far
@@ -24,6 +27,8 @@ interface ResendDomain { name: string; status: string }
 interface Provider {
   key: string; name: string; category: string; auth: Auth; implementation: Impl;
   description: string; secretLabel?: string; secretHint?: string; setupUrl?: string; syncable?: boolean;
+  /** Connected per member (Your connected accounts), not from the org catalog. */
+  personal?: boolean;
   status: "CONNECTED" | "NOT_CONNECTED" | "ERROR";
   configured: boolean;
   config: {
@@ -105,6 +110,11 @@ function DomainChips({ domains }: { domains: ResendDomain[] }) {
 }
 
 export function Integrations() {
+  const { can } = useAuth();
+  // Admins manage the organization's integrations; every member with the
+  // matching permission manages their own Outlook / OneDrive / Google Drive.
+  const isAdmin = can("manageApiIntegrations");
+  const mine = useConnectedAccounts();
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -116,8 +126,10 @@ export function Integrations() {
   const [filter, setFilter] = useState<"all" | "connected" | "setup">("all");
 
   function load() {
+    if (!isAdmin) { setProviders([]); return; }
     api.get<Provider[]>("/integrations")
-      .then(setProviders)
+      // Personal providers render in "Your connected accounts" instead.
+      .then((rows) => setProviders(rows.filter((p) => !p.personal)))
       .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load integrations"));
   }
   useEffect(load, []);
@@ -129,11 +141,18 @@ export function Integrations() {
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const h = new URLSearchParams(window.location.hash.slice(1));
-    const provider = h.get("oauth"), code = h.get("code"), state = h.get("state");
+    const provider = h.get("oauth"), code = h.get("code"), state = h.get("state"), flow = h.get("flow");
     if (q.get("connected")) setFlash(`${q.get("connected")} connected.`);
     else if (q.get("error")) setErr(decodeURIComponent(q.get("error")!));
     if (q.get("connected") || q.get("error") || provider) window.history.replaceState({}, "", window.location.pathname);
-    if (provider && code && state) {
+    if (provider && code && state && flow === "account") {
+      // A member's own account (Outlook / OneDrive / Google Drive).
+      setBusyKey(provider);
+      api.post<{ message: string }>(`/accounts/${encodeURIComponent(provider)}/oauth/complete`, { code, state })
+        .then((r) => { setFlash(r.message); mine.reload(); })
+        .catch((e) => setErr(e instanceof ApiError ? e.message : "Could not complete the connection"))
+        .finally(() => setBusyKey(null));
+    } else if (provider && code && state) {
       setBusyKey(provider);
       api.post<{ connected: string }>(`/integrations/${encodeURIComponent(provider)}/oauth/complete`, { code, state })
         .then(() => { setFlash(`${provider} connected.`); load(); })
@@ -176,7 +195,7 @@ export function Integrations() {
     finally { setBusyKey(null); setDisconnecting(null); }
   }
 
-  if (!providers) return <SettingsLayout><Spinner label="Loading integrations…" /></SettingsLayout>;
+  if (!providers || (!mine.data && !mine.error)) return <SettingsLayout><Spinner label="Loading integrations…" /></SettingsLayout>;
 
   // View filter (presentation only): counts are of the cards on this page.
   const matches = (p: Provider) => filter === "all" || (filter === "connected" ? p.status === "CONNECTED" : p.status !== "CONNECTED");
@@ -192,7 +211,7 @@ export function Integrations() {
             when you connect and stored encrypted; they are never sent back to the browser.
           </p>
         </div>
-        <Segmented
+        {isAdmin && <Segmented
           ariaLabel="Show integrations"
           value={filter}
           onChange={setFilter}
@@ -201,12 +220,16 @@ export function Integrations() {
             { value: "connected", label: "Connected", count: connectedCount },
             { value: "setup", label: "Needs setup", count: providers.length - connectedCount },
           ]}
-        />
+        />}
       </div>
       {err && <Banner kind="error">{err}</Banner>}
+      {mine.error && <Banner kind="error">{mine.error}</Banner>}
       {flash && <Banner kind="info">{flash}</Banner>}
 
-      {shown.length === 0 && <div className="integ-none">Nothing here.</div>}
+      {mine.data && <ConnectedAccountsSection data={mine.data} onReload={mine.reload} onMessage={(m) => { setErr(null); setFlash(m); }} onError={(m) => { setFlash(null); setErr(m); }} />}
+      {isAdmin && <TeamConnections onMessage={(m) => { setErr(null); setFlash(m); }} onError={(m) => { setFlash(null); setErr(m); }} />}
+
+      {isAdmin && shown.length === 0 && <div className="integ-none">Nothing here.</div>}
       {shown.map(([category, items]) => {
         const Icon = CATEGORY_ICON[category] ?? Bot;
         return (

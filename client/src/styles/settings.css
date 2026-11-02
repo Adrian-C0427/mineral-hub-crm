@@ -363,6 +363,25 @@ input.mono-input { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, 
 }
 .integration-link-btn:hover { border-color: var(--line-hover-strong); color: var(--ink); text-decoration: none; }
 .integ-none { padding: 40px; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); text-align: center; font-size: 13px; color: var(--ink-4); }
+/* Your connected accounts (components/ConnectedAccounts.tsx): one row per account inside its provider card. */
+.integ-group-desc { margin: -4px 0 2px; max-width: 760px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
+.ca-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ca-row { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
+.ca-row-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ca-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ca-email { font-size: 13px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.ca-name { font-size: 12px; color: var(--ink-3); }
+.ca-meta { font-size: 12px; color: var(--ink-3); }
+.ca-meta strong { font-weight: 600; color: var(--ink-2); }
+.ca-perms { display: flex; flex-wrap: wrap; gap: 4px; }
+.ca-row .integration-actions { margin-top: 2px; }
+.ca-row .integration-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; height: 28px; }
+.ca-team { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.ca-team-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+.ca-team-row:first-child { border-top: 0; }
+.ca-team-acct { flex: 1 1 200px; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.ca-team-sync { color: var(--ink-4); }
+.ca-team-row button { min-height: 28px; height: 28px; padding: 0 10px; font-size: 12px; }
 /* HighLevel card: sync phase lines; connect modal: setup steps + scope list. */
 .hl-summary { display: flex; flex-direction: column; gap: 6px; }
 .hl-line { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
