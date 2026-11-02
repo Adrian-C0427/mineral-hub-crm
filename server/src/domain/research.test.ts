@@ -201,6 +201,16 @@ describe("guessMapping", () => {
     expect(m.recordingDate).toBe("File Date");
     expect(m.grantee).toBe("Grantee");
   });
+  it("maps Abstract, Survey Name and County to three separate fields", () => {
+    const m = guessMapping(CSV_DOCUMENTS, ["Doc Type", "Recorded Date", "Abstract", "Survey Name", "County", "State", "Legal Description"]);
+    expect(m.abstractId).toBe("Abstract");
+    expect(m.survey).toBe("Survey Name");
+    expect(m.county).toBe("County");
+    expect(m.state).toBe("State");
+    expect(m.legalDescription).toBeUndefined();
+    const p = guessMapping(CSV_PERMITS, ["Operator", "API No", "Abstract", "Survey", "County"]);
+    expect([p.abstractId, p.survey, p.county]).toEqual(["Abstract", "Survey", "County"]);
+  });
   it("no longer maps removed fields (effectiveDate, trs, acreage, consideration)", () => {
     const m = guessMapping(CSV_DOCUMENTS, ["Doc Type", "Recorded Date", "Effective Date", "Acreage", "Consideration", "Section-Township-Range"]);
     expect(m.effectiveDate).toBeUndefined();

@@ -24,7 +24,8 @@ import {
   buildChains, chainTableRows, expandDocToEdges, sideParties, ENTITY_CLASS_LABEL, type TxEdge,
 } from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
-import { formatAbstract } from "../domain/abstractLabel.js";
+import { abstractSortKey, formatAbstract } from "../domain/abstractLabel.js";
+import { abstractNumbers, splitSurveys, SURVEY_SEP } from "../domain/researchGeo.js";
 import { allTimeSpan, isAllPeriod } from "../domain/period.js";
 import { permitApi8, resolvePermitLocations, type WellLocation } from "../domain/permitLocations.js";
 
@@ -256,6 +257,15 @@ interface PermitRow {
  * top-level `OR` so the records search (which sets `where.OR`) composes on
  * top of them without clobbering.
  */
+/** A survey filter value matches a record whose Survey field is that survey
+ *  or lists it among several ("A; B" — researchGeo.SURVEY_SEP). */
+function surveyMatch(values: string[]): { survey: Prisma.StringNullableFilter }[] {
+  return values.flatMap((v) => [
+    { survey: { equals: v } }, { survey: { startsWith: `${v}${SURVEY_SEP}` } },
+    { survey: { endsWith: `${SURVEY_SEP}${v}` } }, { survey: { contains: `${SURVEY_SEP}${v}${SURVEY_SEP}` } },
+  ]);
+}
+
 function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.ResearchDocumentWhereInput {
   const w: Prisma.ResearchDocumentWhereInput = { organizationId: org };
   if (win) w.recordingDate = { gte: win.from, lt: new Date(win.to.getTime() + DAY) };
@@ -263,13 +273,13 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.counties.length) w.county = { in: f.counties };
   if (f.docClass) w.docClass = f.docClass;
   if (f.docTypes.length) w.docType = { in: f.docTypes as ResearchDocType[] };
-  if (f.surveys.length) w.survey = { in: f.surveys };
   // Conveyed interest (extracted from the party cells): a range keeps only
   // records that state one.
   if (f.interestMin != null || f.interestMax != null) {
     w.interestPct = { not: null, ...(f.interestMin != null ? { gte: f.interestMin } : {}), ...(f.interestMax != null ? { lte: f.interestMax } : {}) };
   }
   const and: Prisma.ResearchDocumentWhereInput[] = [];
+  if (f.surveys.length) and.push({ OR: surveyMatch(f.surveys) });
   if (f.buyers.length) and.push({ OR: [{ granteeNorm: { in: f.buyers } }, { granteeNorms: { hasSome: f.buyers } }] });
   if (f.sellers.length) and.push({ OR: [{ grantorNorm: { in: f.sellers } }, { grantorNorms: { hasSome: f.sellers } }] });
   if (hasAbstractFilter(f)) {
@@ -317,7 +327,7 @@ async function docFilterValues(where: Prisma.ResearchDocumentWhereInput) {
     states.add(r.state);
     counties.set(`${r.state}|${r.county}`, { state: r.state, county: r.county });
     docTypes.add(r.docType);
-    if (r.survey) surveys.set(`${r.state}|${r.county}|${r.survey}`, { state: r.state, county: r.county, survey: r.survey });
+    for (const sv of splitSurveys(r.survey)) surveys.set(`${r.state}|${r.county}|${sv}`, { state: r.state, county: r.county, survey: sv });
     const ids = r.abstractIds.length ? r.abstractIds : splitAbstracts(r.abstractId);
     for (const a of ids) abstracts.set(`${r.state}|${r.county}|${a}`, { state: r.state, county: r.county, abstractId: a });
     addParties(grantors, r.grantorNorms, r.grantorParties, r.grantorNorm, r.grantor);
@@ -337,13 +347,15 @@ function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Rese
   if (f.states.length) w.state = { in: f.states };
   if (f.counties.length) w.county = { in: f.counties };
   if (f.operators.length) w.operatorNorm = { in: f.operators };
-  if (f.surveys.length) w.survey = { in: f.surveys };
+  const and: Prisma.ResearchPermitWhereInput[] = [];
+  if (f.surveys.length) and.push({ OR: surveyMatch(f.surveys) });
   if (hasAbstractFilter(f)) {
-    w.AND = [{ OR: [
+    and.push({ OR: [
       ...(f.abstractIds.length ? [{ abstractId: { in: f.abstractIds } }] : []),
       ...f.abstractKeys.map((k) => ({ state: k.state, county: k.county, abstractId: k.abstractId })),
-    ] }];
+    ] });
   }
+  if (and.length) w.AND = and;
   if (f.statuses.length) w.status = { in: f.statuses as ResearchPermitStatus[] };
   if (f.trajectories.length) w.trajectory = { in: f.trajectories as WellTrajectory[] };
   return w;
@@ -505,7 +517,7 @@ researchRouter.get(
     // Survey names, dynamically from the imported data (documents + permits).
     const surveySet = docVals.surveys;
     for (const sv of permitSurveys) {
-      if (sv.survey) surveySet.set(`${sv.state}|${sv.county}|${sv.survey}`, { state: sv.state, county: sv.county, survey: sv.survey });
+      for (const name of splitSurveys(sv.survey)) surveySet.set(`${sv.state}|${sv.county}|${name}`, { state: sv.state, county: sv.county, survey: name });
     }
     // RRC permits' own W-1 locations (Texas-only source).
     for (const l of rrcLoc) {
@@ -1468,7 +1480,7 @@ researchRouter.get(
     res.json({
       counties: counties.map((r) => r.county).filter(Boolean),
       abstracts: abstracts.filter((r) => !!r.abstractId).map((r) => abstractKeyOf({ state: r.state, county: r.county, abstractId: r.abstractId! })),
-      surveys: surveys.map((r) => r.survey).filter((v): v is string => !!v),
+      surveys: [...new Set(surveys.flatMap((r) => splitSurveys(r.survey)))].sort((a, b) => a.localeCompare(b)),
       statuses: statuses.map((r) => r.status).filter(Boolean),
       trajectories: trajectories.map((r) => r.trajectory).filter(Boolean),
     });
@@ -1497,15 +1509,18 @@ researchRouter.get(
 
     const docs = await prisma.researchDocument.findMany({
       where: { ...docWhere(org, { ...f, counties: [county] }, win), abstractId: { not: null } },
-      select: { abstractId: true, consideration: true },
+      select: { abstractId: true, abstractIds: true, consideration: true },
     });
+    // Every abstract a record names is shaded (the record counts once for each).
     const stats = new Map<string, { count: number; amount: number }>();
     for (const d of docs) {
-      const k = abstractJoinKey(d.abstractId!);
-      if (!k) continue;
-      const st = stats.get(k) ?? { count: 0, amount: 0 };
-      st.count++; st.amount += d.consideration ?? 0;
-      stats.set(k, st);
+      for (const n of d.abstractIds.length ? d.abstractIds : abstractNumbers(d.abstractId)) {
+        const k = abstractJoinKey(n);
+        if (!k) continue;
+        const st = stats.get(k) ?? { count: 0, amount: 0 };
+        st.count++; st.amount += d.consideration ?? 0;
+        stats.set(k, st);
+      }
     }
 
     // Abstract polygons for the county; simplified — this is a summary map.
@@ -1594,6 +1609,29 @@ researchRouter.get(
 );
 
 /**
+ * A page of rows in ABSTRACT order. Abstracts sort by number ("2" before "15"
+ * before "100"), which text order can't do, so the matching rows' abstracts
+ * are read, ordered here (rows without one last, either direction; newest
+ * first within the same abstract) and the page's ids returned in order.
+ */
+function abstractOrderedPage(
+  rows: { id: string; abstracts: string[]; date: Date }[], dir: "asc" | "desc", page: number, pageSize: number,
+): string[] {
+  const key = (r: { abstracts: string[] }) => (r.abstracts.length ? abstractSortKey(r.abstracts[0]) : null);
+  const sorted = [...rows].sort((a, b) => {
+    const ka = key(a), kb = key(b);
+    if (ka == null || kb == null) return ka == null && kb == null ? 0 : ka == null ? 1 : -1;
+    return (dir === "asc" ? ka - kb : kb - ka) || (a.abstracts[0] ?? "").localeCompare(b.abstracts[0] ?? "", undefined, { numeric: true })
+      || b.date.getTime() - a.date.getTime() || a.id.localeCompare(b.id);
+  });
+  return sorted.slice((page - 1) * pageSize, page * pageSize).map((r) => r.id);
+}
+const inOrder = <T extends { id: string }>(rows: T[], ids: string[]): T[] => {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.map((id) => byId.get(id)).filter((r): r is T => !!r);
+};
+
+/**
  * Records search predicates, shared by the paginated list endpoints and
  * /records/ids (whole-dataset selection) so "what matches" is defined once.
  */
@@ -1672,6 +1710,12 @@ researchRouter.get(
     const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
     const where = docWhere(org, f, win);
     applyDocSearch(where, q, instrument);
+    if (sortBy === "abstractId") {
+      const all = await prisma.researchDocument.findMany({ where, select: { id: true, abstractId: true, abstractIds: true, recordingDate: true } });
+      const ids = abstractOrderedPage(all.map((r) => ({ id: r.id, abstracts: r.abstractIds.length ? r.abstractIds : abstractNumbers(r.abstractId), date: r.recordingDate })), sortDir, page, pageSize);
+      const rows = inOrder(await prisma.researchDocument.findMany({ where: { id: { in: ids } } }), ids);
+      return res.json({ total: all.length, page, pageSize, rows });
+    }
     const [total, rows] = await Promise.all([
       prisma.researchDocument.count({ where }),
       prisma.researchDocument.findMany({
@@ -1694,6 +1738,12 @@ researchRouter.get(
     const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
     const where = permitWhere(org, f, win);
     applyPermitSearch(where, q, instrument);
+    if (sortBy === "abstractId") {
+      const all = await prisma.researchPermit.findMany({ where, select: { id: true, abstractId: true, activityDate: true } });
+      const ids = abstractOrderedPage(all.map((r) => ({ id: r.id, abstracts: abstractNumbers(r.abstractId), date: r.activityDate })), sortDir, page, pageSize);
+      const rows = inOrder(await prisma.researchPermit.findMany({ where: { id: { in: ids } } }), ids);
+      return res.json({ total: all.length, page, pageSize, rows });
+    }
     const [total, rows] = await Promise.all([
       prisma.researchPermit.count({ where }),
       prisma.researchPermit.findMany({
@@ -1835,6 +1885,22 @@ researchRouter.post(
     const summary = await ingestResearchCsv({
       prisma, organizationId: orgId(req), createdByUserId: req.user!.id,
       category, csv, mapping, filename, assignedState, assignedCounty,
+    });
+    res.json(summary);
+  }),
+);
+
+// Preview: the first rows exactly as the import would store them (location
+// fields processed — Abstract, Survey Name, County — and each row's outcome),
+// a dry run with no writes, so the mapping can be checked before importing.
+researchRouter.post(
+  "/ingest/preview",
+  requirePermission("manageResearchData"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { category, csv, mapping, assignedState, assignedCounty } = commitSchema.parse(req.body);
+    const summary = await ingestResearchCsv({
+      prisma, organizationId: orgId(req), createdByUserId: req.user!.id,
+      category, csv, mapping, assignedState, assignedCounty, dryRun: true, previewRows: 8,
     });
     res.json(summary);
   }),

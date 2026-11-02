@@ -13,6 +13,7 @@ import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { useAbstractIndex } from "../components/AbstractPicker";
 import { rankAbstracts } from "../lib/abstracts";
+import { countySt, recordAbstracts, recordSurveys, surveyName } from "../lib/researchGeo";
 import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -86,6 +87,9 @@ interface DocRecord {
   interestPct?: number | null;
   partyInterests?: PartyInterestRec[] | null;
   abstractId: string | null; survey: string | null; acreage: number | null; consideration: number | null; source: string;
+  /** Each abstract NUMBER on the record ("923"); `abstractId` is the cell as recorded. */
+  abstractIds?: string[];
+  legalDescription?: string | null;
 }
 /** Per-party detail: a share of the interest and/or an annotation the clerk wrote against the party. */
 interface PartyInterestRec { side: "GRANTOR" | "GRANTEE"; party: string; norm: string; pct: number | null; text: string | null; acres?: number | null; note?: string | null }
@@ -129,6 +133,7 @@ interface PermitRecord {
   id: string; state: string; county: string; apiNumber: string | null; permitNumber: string | null;
   operator: string; leaseName: string | null; wellName: string | null; status: string; trajectory: string;
   activityDate: string; field: string | null; source: string;
+  abstractId?: string | null; survey?: string | null;
 }
 interface Paged<T> { total: number; page: number; pageSize: number; rows: T[] }
 // Platform RRC W-1 permits (rrc.permits) — read-only public-record rows,
@@ -803,6 +808,7 @@ function ResearchSurveyFilter({ options, states, counties, value, onChange }: {
     <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Surveys</label>
       <SearchableMultiSelect
         options={names}
+        labels={Object.fromEntries(names.map((v) => [v, surveyName(v) || v]))}
         value={value}
         onChange={onChange}
         placeholder={names.length ? "Search surveys…" : "No surveys in the data"}
@@ -2248,6 +2254,10 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   }
 
   const [exporting, setExporting] = useState(false);
+  // Exports carry the same three location fields as the table.
+  const GEO_HEADERS = ["Abstract", "Survey Name", "County"];
+  const geoCells = (r: { abstractId?: string | null; abstractIds?: string[] | null; survey?: string | null; county: string; state?: string | null }) =>
+    [recordAbstracts(r).join(", "), recordSurveys(r, absIndex.find).join("; "), countySt(r.county, r.state)];
   async function exportRows(onlySelected: boolean) {
     setExporting(true);
     try {
@@ -2255,19 +2265,19 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         let rows = await fetchAllRows<DocRecord>("documents");
         if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
         downloadCsv(onlySelected ? "research-documents-selected.csv" : "research-documents.csv",
-          ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Interest conveyed", "Instrument #", "State", "County", "Abstract"],
-          rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, interestText(r), r.instrumentNumber, r.state, r.county, r.abstractId]));
+          ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Interest conveyed", "Instrument #", ...GEO_HEADERS],
+          rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, interestText(r), r.instrumentNumber, ...geoCells(r)]));
       } else if (kind === "rrcPermits") {
         const rows = await fetchAllRows<RrcPermitRecord>("rrc-permits");
         downloadCsv("rrc-permits.csv",
-          ["Permit Date", "Operator", "Lease", "Well #", "County", "Abstract", "Survey", "Unit Acres", "API #", "Permit #"],
-          rows.map((r) => [r.permitDate?.slice(0, 10) ?? "", r.operator, r.leaseName, r.wellNo, r.county, r.abstract, r.survey, r.acres != null ? String(r.acres) : "", r.api8 ? `42-${r.api8}` : "", r.statusNo]));
+          ["Permit Date", "Operator", "Lease", "Well #", ...GEO_HEADERS, "Unit Acres", "API #", "Permit #"],
+          rows.map((r) => [r.permitDate?.slice(0, 10) ?? "", r.operator, r.leaseName, r.wellNo, ...geoCells({ abstractId: r.abstract, survey: r.survey, county: r.county, state: "TX" }), r.acres != null ? String(r.acres) : "", r.api8 ? `42-${r.api8}` : "", r.statusNo]));
       } else {
         let rows = await fetchAllRows<PermitRecord>("permits");
         if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
         downloadCsv(onlySelected ? "research-permits-selected.csv" : "research-permits.csv",
-          ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Source"],
-          rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.source]));
+          ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", ...GEO_HEADERS, "Source"],
+          rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, ...geoCells(r), r.source]));
       }
     } finally { setExporting(false); }
   }
@@ -2278,6 +2288,21 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const totalPages = active ? Math.max(1, Math.ceil(active.total / pageSize)) : 1;
 
   const dash = <span className="rs-zero">—</span>;
+  /** The three location columns, shared by every Records table: the abstract
+   *  number(s), the survey name(s) (the record's own, else each abstract's from
+   *  the GIS index by county + number) and "County, ST". */
+  type GeoRow = { abstractId?: string | null; abstractIds?: string[] | null; survey?: string | null; county: string; state?: string | null };
+  function geoColumns<R>(geo: (r: R) => GeoRow, abstractKey = "abstractId"): Column<R>[] {
+    const surveys = (r: R) => recordSurveys(geo(r), absIndex.find);
+    return [
+      { key: abstractKey, header: "Abstract", value: (r) => recordAbstracts(geo(r)).join(", ") || null, align: "right",
+        render: (r) => { const a = recordAbstracts(geo(r)); return a.length ? <span className="rs-mid chips-oneline"><ChipList items={a} /></span> : dash; } },
+      { key: "survey", header: "Survey Name", value: (r) => surveys(r).join("; ") || null, revealWhenNew: true,
+        render: (r) => { const s = surveys(r); return s.length ? <span className="rs-mid chips-oneline"><ChipList items={s} /></span> : dash; } },
+      { key: "county", header: "County", value: (r) => countySt(geo(r).county, geo(r).state),
+        render: (r) => <span className="rs-mid rec-nowrap">{countySt(geo(r).county, geo(r).state)}</span> },
+    ];
+  }
   const docColumns: Column<DocRecord>[] = [
     { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rs-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
     { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <DocTypeTag docType={r.docType} raw={r.docTypeRaw} /> },
@@ -2286,8 +2311,8 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "grantor", header: dataset === "LEASE" ? "Grantor (lessor)" : "Grantor (seller)", value: (r) => r.grantor, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} /></span> },
     { key: "grantee", header: dataset === "LEASE" ? "Grantee (lessee)" : "Grantee (buyer)", value: (r) => r.grantee, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} /></span> },
     { key: "interestPct", header: "Interest conveyed", value: (r) => r.interestPct ?? null, align: "right", type: "number", render: (r) => <InterestCell r={r} /> },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, {r.state}</span> },
-    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rs-mid chips-oneline"><ChipList items={r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state))} /></span> : dash },
+    // Location: Abstract, Survey Name and County as three columns (lib/researchGeo).
+    ...geoColumns<DocRecord>((r) => r),
     { key: "instrumentNumber", header: "Instrument #", value: (r) => r.instrumentNumber, align: "right", render: (r) => r.instrumentNumber ? <span className="rs-mono rec-nowrap">{r.instrumentNumber}</span> : dash },
   ];
   const permitColumns: Column<PermitRecord>[] = [
@@ -2296,7 +2321,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "leaseName", header: "Lease / well", value: (r) => `${r.leaseName ?? ""} ${r.wellName ?? ""}`.trim() || null },
     { key: "status", header: "Status", value: (r) => r.status, render: (r) => <EnumTag value={r.status} /> },
     { key: "trajectory", header: "Trajectory", value: (r) => r.trajectory, render: (r) => <EnumTag value={r.trajectory} /> },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, {r.state}</span> },
+    ...geoColumns<PermitRecord>((r) => r),
     { key: "apiNumber", header: "API #", value: (r) => r.apiNumber, align: "right", render: (r) => r.apiNumber ? <span className="rs-mono rec-nowrap">{r.apiNumber}</span> : dash },
   ];
 
@@ -2304,9 +2329,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "permitDate", header: "Permit date", value: (r) => r.permitDate, render: (r) => r.permitDate ? <span className="rs-mid rec-nowrap">{fmtDate(r.permitDate)}</span> : dash, type: "date" },
     { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => r.operator ? <span className="rec-name">{r.operator}</span> : dash },
     { key: "leaseName", header: "Lease / well", value: (r) => `${r.leaseName ?? ""} ${r.wellNo ?? ""}`.trim() || null, render: (r) => <span>{r.leaseName ?? "—"}{r.wellNo ? ` #${r.wellNo}` : ""}</span> },
-    { key: "county", header: "County", value: (r) => r.county, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, TX</span> },
-    { key: "abstract", header: "Abstract", value: (r) => r.abstract, align: "right", render: (r) => r.abstract ? <span className="rs-mid chips-oneline"><ChipList items={[absIndex.label(r.abstract, r.county, "TX")]} /></span> : dash },
-    { key: "survey", header: "Survey", value: (r) => r.survey },
+    ...geoColumns<RrcPermitRecord>((r) => ({ abstractId: r.abstract, survey: r.survey, county: r.county, state: "TX" }), "abstract"),
     { key: "acres", header: "Unit (ac)", value: (r) => r.acres, align: "right", type: "number", render: (r) => r.acres != null ? <span className="rs-mid rec-nowrap">{acres(r.acres)}</span> : dash },
     { key: "apiNumber", header: "API #", value: (r) => r.api8, align: "right", render: (r) => r.api8 ? <span className="rs-mono rec-nowrap">{`42-${r.api8.slice(0, 3)}-${r.api8.slice(3)}`}</span> : dash },
   ];
@@ -2353,7 +2376,8 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         <div><div className="rec-flabel">County</div>
           <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
         <div><div className="rec-flabel">Survey</div>
-          <SearchableMultiSelect options={opts.surveys ?? []} value={rf.surveys} onChange={(v) => setRf((p) => ({ ...p, surveys: v }))} placeholder="Surveys…" /></div>
+          <SearchableMultiSelect options={opts.surveys ?? []} labels={Object.fromEntries((opts.surveys ?? []).map((v) => [v, surveyName(v) || v]))}
+            value={rf.surveys} onChange={(v) => setRf((p) => ({ ...p, surveys: v }))} placeholder="Surveys…" /></div>
         <div><div className="rec-flabel">Abstract</div>
           <SearchableMultiSelect options={opts.abstracts} labels={recAbstractLabels} filterOptions={rankRecAbstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstract # or survey…" /></div>
         {kind === "rrcPermits" ? null : kind === "documents" ? (
