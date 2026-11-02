@@ -6,6 +6,7 @@ import { downloadCsv } from "../lib/csv";
 import { fmtDate, fmtDateTime } from "../lib/format";
 import { CsvDropzone } from "./CsvDropzone";
 import { Segmented, Tag } from "./kit";
+import { countySt, surveyName } from "../lib/researchGeo";
 
 /**
  * Research data management: CSV import (Deeds / Leases / Drilling Permits →
@@ -33,19 +34,22 @@ interface IngestRun {
 type RowOutcome = "IMPORTED" | "DUPLICATE" | "UPDATED" | "REJECTED";
 interface ReviewRow { rowIndex: number; outcome: RowOutcome; reason: string | null; data: Record<string, string> }
 interface ReviewResp { kind: "DOCUMENTS" | "PERMITS"; rows: ReviewRow[] }
+/** A dry run of the mapped file: totals for every row + the first rows as stored. */
+interface PreviewResp { rowsTotal: number; imported: number; updated: number; duplicates: number; rejected: number; preview?: ReviewRow[] }
 
 // Templates match the canonical columns for each Data Type.
+// Location is three columns — Abstract, Survey Name, County — plus the State.
 const DEED_TEMPLATE = {
-  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey"],
-  rows: [["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC", "2026-00412", "Leon", "289653", "J HALLMARK"]],
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "Abstract", "Survey Name", "County", "State"],
+  rows: [["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC", "2026-00412", "923", "J. Warnick Survey", "Leon", "TX"]],
 };
 const LEASE_TEMPLATE = {
-  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey"],
-  rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "Leon", "289183", "T RAGSDALE"]],
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "Abstract", "Survey Name", "County", "State"],
+  rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "311", "T. Ragsdale Survey", "Leon", "TX"]],
 };
 const PERMIT_TEMPLATE = {
-  headers: ["Operator Name", "County", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date"],
-  rows: [["Apex Energy Partners LP", "Leon", "42-289-40012", "889321", "HALLMARK UNIT", "1H", "Approved", "Horizontal", "03/02/2026", "03/20/2026", ""]],
+  headers: ["Operator Name", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date", "Abstract", "Survey Name", "County", "State"],
+  rows: [["Apex Energy Partners LP", "42-289-40012", "889321", "HALLMARK UNIT", "1H", "Approved", "Horizontal", "03/02/2026", "03/20/2026", "", "923", "J. Warnick Survey", "Leon", "TX"]],
 };
 
 /** Import-history "Type" label from the stored source tag. */
@@ -77,6 +81,9 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [confirmRuns, setConfirmRuns] = useState(false);
   const [deletingRuns, setDeletingRuns] = useState(false);
   const [reviewRun, setReviewRun] = useState<IngestRun | null>(null);
+  const [preview, setPreview] = useState<PreviewResp | null>(null);
+  const [previewErr, setPreviewErr] = useState("");
+  const previewSeq = useRef(0);
 
   const loadRuns = () => api.get<IngestRun[]>("/research/ingest/runs").then(setRuns).catch(() => {});
   useEffect(() => { loadRuns(); }, []);
@@ -130,6 +137,26 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   }
 
   const requiredMissing = analysis?.fields.filter((f) => f.required && !mapping[f.key]) ?? [];
+
+  // Preview: re-run (debounced) whenever the mapping or the assigned
+  // State/County changes — the rows exactly as they would be stored.
+  const mappingKey = JSON.stringify(mapping);
+  useEffect(() => {
+    setPreviewErr("");
+    if (!analysis || !csv || requiredMissing.length) { setPreview(null); return; }
+    const seq = ++previewSeq.current;
+    const t = setTimeout(() => {
+      api.post<PreviewResp>("/research/ingest/preview", {
+        category, csv, mapping,
+        assignedState: assignState.trim() || undefined,
+        assignedCounty: assignCounty.trim() || undefined,
+      })
+        .then((p) => { if (seq === previewSeq.current) setPreview(p); })
+        .catch((e) => { if (seq === previewSeq.current) { setPreview(null); setPreviewErr(e instanceof Error ? e.message : "Could not preview this file"); } });
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis, csv, category, mappingKey, assignState, assignCounty, requiredMissing.length]);
   const allRunsSelected = runs.length > 0 && runs.every((r) => selectedRuns.has(r.id));
   const someRunsSelected = selectedRuns.size > 0 && !allRunsSelected;
 
@@ -180,6 +207,11 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                 </div>
               ))}
             </div>
+            <p className="rs-mapping-note">
+              Abstract, Survey Name and County are separate fields — map each to its own column. If the file has one combined
+              location column, map it to each of them: every field takes only its own part, where the text names it outright
+              ("A-923", "J. Warnick Survey", "Leon County"). Anything not named stays blank.
+            </p>
             {requiredMissing.length > 0 && (
               <Banner kind="warn">Required: {requiredMissing.map((f) => f.label).join(", ")}</Banner>
             )}
@@ -206,6 +238,9 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                 </div>
               </div>
             )}
+
+            {previewErr && <Banner kind="error">{previewErr}</Banner>}
+            {preview?.preview && <ImportPreview kind={category === "permits" ? "PERMITS" : "DOCUMENTS"} p={preview} />}
 
             <div className="rs-import-go">
               <button type="button" className="primary"
@@ -326,14 +361,59 @@ const OUTCOME_TABS: { key: RowOutcome; label: string }[] = [
   { key: "UPDATED", label: "Updated" },
   { key: "REJECTED", label: "Rejected" },
 ];
-const DOC_COLS: [string, string][] = [
+type ReviewCol = [key: string, label: string, get?: (d: Record<string, string>) => string];
+/** The location as stored (Abstract / Survey Name / County); imports made
+ *  before these were recorded show the cells as mapped. */
+const GEO_COLS: ReviewCol[] = [
+  ["abstract", "Abstract", (d) => d.abstract ?? d.abstractId ?? ""],
+  ["surveyName", "Survey Name", (d) => d.surveyName ?? surveyName(d.survey)],
+  ["countyLabel", "County", (d) => d.countyLabel ?? countySt(d.county, d.state)],
+];
+const DOC_COLS: ReviewCol[] = [
   ["docType", "Doc Type"], ["recordingDate", "Recorded"], ["grantor", "Grantor"], ["grantee", "Grantee"],
-  ["instrumentNumber", "Instrument #"], ["volume", "Vol"], ["page", "Pg"], ["county", "County"], ["state", "St"], ["abstractId", "Abstract"],
+  ["instrumentNumber", "Instrument #"], ["volume", "Vol"], ["page", "Pg"], ...GEO_COLS,
 ];
-const PERMIT_COLS: [string, string][] = [
+const PERMIT_COLS: ReviewCol[] = [
   ["operator", "Operator"], ["apiNumber", "API"], ["permitNumber", "Permit"], ["leaseName", "Lease"], ["wellName", "Well"],
-  ["status", "Status"], ["filedDate", "Filed"], ["approvedDate", "Approved"], ["county", "County"], ["state", "St"],
+  ["status", "Status"], ["filedDate", "Filed"], ["approvedDate", "Approved"], ...GEO_COLS,
 ];
+const cellOf = ([k, , get]: ReviewCol, d: Record<string, string>): string => (get ? get(d) : d[k] ?? "");
+
+const OUTCOME_LABEL: Record<RowOutcome, string> = { IMPORTED: "Will import", UPDATED: "Will update", DUPLICATE: "Duplicate", REJECTED: "Skipped" };
+
+/** The import preview: whole-file totals and the first rows as they will be stored. */
+function ImportPreview({ kind, p }: { kind: "DOCUMENTS" | "PERMITS"; p: PreviewResp }) {
+  const lead: ReviewCol[] = kind === "PERMITS"
+    ? [["operator", "Operator"], ["apiNumber", "API"], ["leaseName", "Lease"]]
+    : [["docType", "Doc Type"], ["recordingDate", "Recorded"], ["grantor", "Grantor"], ["grantee", "Grantee"]];
+  const cols = [...lead, ...GEO_COLS];
+  const rows = p.preview ?? [];
+  return (
+    <div className="rs-preview">
+      <div className="rs-step-head">
+        Preview <span>
+          ({p.imported.toLocaleString()} will import{p.updated ? ` · ${p.updated.toLocaleString()} will update` : ""}
+          {p.duplicates ? ` · ${p.duplicates.toLocaleString()} duplicate${p.duplicates === 1 ? "" : "s"}` : ""}
+          {p.rejected ? ` · ${p.rejected.toLocaleString()} skipped` : ""} — first {rows.length} row{rows.length === 1 ? "" : "s"} as stored)
+        </span>
+      </div>
+      <div className="table-scroll rs-review-scroll">
+        <table className="data-table rs-sticky-head">
+          <thead><tr><th style={{ width: 56 }}>Row</th>{cols.map(([k, l]) => <th key={k}>{l}</th>)}<th>Result</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.rowIndex}>
+                <td className="rs-mid">{r.rowIndex + 1}</td>
+                {cols.map((c) => <td key={c[0]}>{cellOf(c, r.data) || <span className="rs-zero">—</span>}</td>)}
+                <td className="rs-mid">{OUTCOME_LABEL[r.outcome]}{r.reason ? `: ${r.reason}` : ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function ImportReview({ runId }: { runId: string }) {
   const [resp, setResp] = useState<ReviewResp | null>(null);
@@ -361,7 +441,7 @@ function ImportReview({ runId }: { runId: string }) {
     downloadCsv(
       `import-review-${runId.slice(0, 8)}.csv`,
       ["Row", "Outcome", "Reason", ...cols.map(([, l]) => l)],
-      resp.rows.map((r) => [r.rowIndex + 1, r.outcome, r.reason ?? "", ...cols.map(([k]) => r.data[k] ?? "")]),
+      resp.rows.map((r) => [r.rowIndex + 1, r.outcome, r.reason ?? "", ...cols.map((c) => cellOf(c, r.data))]),
     );
   }
 
@@ -393,7 +473,7 @@ function ImportReview({ runId }: { runId: string }) {
               {rows.slice(0, 500).map((r) => (
                 <tr key={r.rowIndex}>
                   <td className="rs-mid">{r.rowIndex + 1}</td>
-                  {cols.map(([k]) => <td key={k}>{r.data[k] || <span className="rs-zero">—</span>}</td>)}
+                  {cols.map((c) => <td key={c[0]}>{cellOf(c, r.data) || <span className="rs-zero">—</span>}</td>)}
                   {showReason && <td className="rs-mid">{r.reason ?? "—"}</td>}
                 </tr>
               ))}

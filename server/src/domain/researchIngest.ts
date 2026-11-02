@@ -15,9 +15,11 @@
 import type { Prisma, PrismaClient, ResearchDocClass, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
 import { parse } from "csv-parse/sync";
 import { HttpError } from "../middleware/errors.js";
+import { locationFields, normState, titleCounty } from "./researchGeo.js";
+import { gisSurveyLookup, surveysFor } from "../services/researchGeoFill.js";
 import {
   classifyDocType, classifyPermitStatus, classifyTrajectory,
-  documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, splitAbstracts, normField, PARTY_RULES_VERSION } from "./research.js";
+  documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, normField, PARTY_RULES_VERSION } from "./research.js";
 
 // Cap rows per ingest so a single file can't drive an unbounded parse/insert
 // pass (the char-level MAX_CSV_CHARS bound still applies to the raw body).
@@ -54,65 +56,9 @@ export function parseRecordDate(s: string): Date | null {
  * that resolves to neither is skipped. This lets the module scale beyond any one
  * county without manual correction.
  */
-/**
- * Geography is stored ONE way: state as its USPS code ("TX"), county as a bare
- * title-cased name ("Leon", "McMullen", "De Witt"). County indexes write the
- * same place many ways ("Leon, Texas", "LEON COUNTY", "leon county, tx"), and
- * every variant must land on the same key or Research shows one county twice.
- */
-export const STATE_CODES: Record<string, string> = {
-  ALABAMA: "AL", ALASKA: "AK", ARIZONA: "AZ", ARKANSAS: "AR", CALIFORNIA: "CA", COLORADO: "CO", CONNECTICUT: "CT",
-  DELAWARE: "DE", FLORIDA: "FL", GEORGIA: "GA", HAWAII: "HI", IDAHO: "ID", ILLINOIS: "IL", INDIANA: "IN", IOWA: "IA",
-  KANSAS: "KS", KENTUCKY: "KY", LOUISIANA: "LA", MAINE: "ME", MARYLAND: "MD", MASSACHUSETTS: "MA", MICHIGAN: "MI",
-  MINNESOTA: "MN", MISSISSIPPI: "MS", MISSOURI: "MO", MONTANA: "MT", NEBRASKA: "NE", NEVADA: "NV", "NEW HAMPSHIRE": "NH",
-  "NEW JERSEY": "NJ", "NEW MEXICO": "NM", "NEW YORK": "NY", "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", OHIO: "OH",
-  OKLAHOMA: "OK", OREGON: "OR", PENNSYLVANIA: "PA", "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD",
-  TENNESSEE: "TN", TEXAS: "TX", UTAH: "UT", VERMONT: "VT", VIRGINIA: "VA", WASHINGTON: "WA", "WEST VIRGINIA": "WV",
-  WISCONSIN: "WI", WYOMING: "WY", "DISTRICT OF COLUMBIA": "DC",
-};
-const STATE_CODE_SET = new Set(Object.values(STATE_CODES));
-
-/** "Texas", "TEXAS", "tx", "Tex." → "TX". Unknown text is uppercased as before. */
-export function normState(s: string): string {
-  const t = s.trim().toUpperCase().replace(/[.,]+$/, "").replace(/\s+/g, " ");
-  if (STATE_CODES[t]) return STATE_CODES[t];
-  if (t === "TEX") return "TX";
-  if (t.startsWith("STATE OF ") && STATE_CODES[t.slice(9)]) return STATE_CODES[t.slice(9)];
-  return t;
-}
-
-/** Lower-case particles that stay lower inside a county name ("Isle of Wight"). */
-const COUNTY_LOWER = new Set(["OF", "THE", "DE", "LA", "DU", "AND"]);
-/** County names that are camel-cased in the static county lists. Keyed by the
- *  upper-cased name; "Mc<Name>" is handled generically (every Mc county is one). */
-const COUNTY_CAMEL: Record<string, string> = {
-  DEWITT: "DeWitt", DESOTO: "DeSoto", DEKALB: "DeKalb", DEBACA: "DeBaca", LASALLE: "LaSalle", LAMOURE: "LaMoure",
-  LAPORTE: "LaPorte", LAGRANGE: "LaGrange", LARUE: "LaRue", MACOUPIN: "Macoupin", MACON: "Macon", MACOMB: "Macomb",
-};
-
-/**
- * "LEON COUNTY", "leon", "Leon County, TX", "Leon Co." → "Leon"; "MCMULLEN" →
- * "McMullen", "DEWITT" → "DeWitt", "ST. LANDRY PARISH" → "St. Landry". A
- * trailing ", <state>" the clerk tacked on is dropped (the state is its own
- * field); the county keeps the casing the static county lists use.
- */
-export function titleCounty(s: string): string {
-  let t = s.trim().replace(/\s+/g, " ");
-  // "Leon County, TX" / "Leon, Texas": the state belongs in its own column.
-  const tail = t.match(/^(.*?)[,\s]+(?:STATE OF\s+)?([A-Za-z .]+?)\.?$/i);
-  if (tail && STATE_CODE_SET.has(normState(tail[2])) && tail[1].trim()) t = tail[1].trim();
-  t = t.replace(/[\s,]+(county|co\.?|parish|borough)$/i, "").replace(/[,\s]+$/, "").trim();
-  const cap = (x: string) => (x ? x[0].toUpperCase() + x.slice(1).toLowerCase() : x);
-  const words = t.split(" ").map((w, i) => {
-    const up = w.toUpperCase();
-    if (i > 0 && COUNTY_LOWER.has(up)) return up.toLowerCase();
-    if (COUNTY_CAMEL[up]) return COUNTY_CAMEL[up];
-    if (/^MC[A-Z]/i.test(w) && w.length > 3) return "Mc" + cap(w.slice(2));
-    // Hyphenated / apostrophe parts each get a capital ("O'Brien", "Miami-Dade").
-    return w.split(/(['-])/).map((part) => (part === "'" || part === "-" ? part : cap(part))).join("");
-  });
-  return words.join(" ");
-}
+// State/county normalization lives with the other Research geography rules
+// (domain/researchGeo.ts); re-exported here for existing importers.
+export { STATE_CODES, normState, titleCounty } from "./researchGeo.js";
 
 export type ImportCategory = "deeds" | "leases" | "permits";
 
@@ -141,6 +87,8 @@ export interface IngestArgs {
   assignedCounty?: string | null;
   /** Parse + classify + dedup with NO database writes (no run, no rows). */
   dryRun?: boolean;
+  /** With dryRun: return the first N rows' outcomes and processed values (the import preview). */
+  previewRows?: number;
   /**
    * Scheduled/headless sync (county scan routines, CLI). The records import
    * exactly like any other, but the run stays out of the user-facing Import
@@ -161,6 +109,8 @@ export interface IngestSummary {
   failed: number;
   skippedReasons: { reason: string; count: number }[];
   dryRun: boolean;
+  /** The first rows as they would import (IngestArgs.previewRows). */
+  preview?: { rowIndex: number; outcome: string; reason: string | null; data: Record<string, string> }[];
 }
 
 /**
@@ -180,7 +130,7 @@ export interface IngestSummary {
 export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary> {
   const {
     prisma, organizationId: org, createdByUserId, category, csv, mapping,
-    filename, assignedState, assignedCounty, dryRun = false, automated = false,
+    filename, assignedState, assignedCounty, dryRun = false, automated = false, previewRows = 0,
   } = args;
   const { kind, source, docClass: wantClass } = resolveCategory(category);
   const fallbackState = assignedState ? normState(assignedState) : null;
@@ -193,6 +143,41 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
   const numOf = (s: string): number | null => {
     const n = parseFloat(s.replace(/[^0-9.\-]/g, ""));
     return Number.isFinite(n) ? n : null;
+  };
+  // Location: Abstract, Survey Name and County are separate fields
+  // (domain/researchGeo.ts locationFields), each from the column mapped to it
+  // — a combined location column mapped to several gives each only its own
+  // part. State and county then fall back to the file's assigned values.
+  // Nothing missing is invented: a blank survey is only filled from the GIS
+  // abstract layer below, where county + abstract number name it.
+  const geoOf = (row: Record<string, string>) => {
+    const loc = locationFields({ abstract: get(row, "abstractId"), survey: get(row, "survey"), county: get(row, "county") });
+    return {
+      state: get(row, "state") ? normState(get(row, "state")) : loc.state ?? fallbackState,
+      county: loc.county ?? fallbackCounty,
+      abstractId: loc.abstractCell,
+      abstractIds: loc.abstracts,
+      survey: loc.survey,
+      // A combined location cell, kept as recorded on the record.
+      legalDescription: loc.combined,
+    };
+  };
+  type Geo = ReturnType<typeof geoOf>;
+  // The location as it will be stored, beside the raw cells in the review trail.
+  const geoView = (g: Geo) => ({
+    abstract: g.abstractIds.join(", "), surveyName: g.survey ?? "",
+    countyLabel: g.county ? [g.county, g.state].filter(Boolean).join(", ") : "",
+  });
+  // Rows still without a survey in a Texas county: each abstract's survey from
+  // the GIS layer, when every one is unique (services/researchGeoFill surveysFor).
+  const surveyFills: { set: (s: string) => void; county: string; abstractNos: string[] }[] = [];
+  const wantSurvey = (g: Geo, set: (s: string) => void) => {
+    if (!g.survey && g.state === "TX" && g.county && g.abstractIds.length) surveyFills.push({ set, county: g.county, abstractNos: g.abstractIds });
+  };
+  const fillSurveys = async () => {
+    if (!surveyFills.length) return;
+    const lookup = await gisSurveyLookup(prisma, surveyFills.map((f) => f.county));
+    for (const f of surveyFills) { const s = surveysFor(lookup, f.county, f.abstractNos); if (s) f.set(s); }
   };
 
   let imported = 0, updated = 0, duplicates = 0, rejected = 0;
@@ -258,13 +243,16 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const docTypeRaw = get(row, "docType");
-      // The mapped values, exactly as the reviewer should see them.
+      const g = geoOf(row);
+      // The mapped values, exactly as the reviewer should see them, plus the
+      // location as it will be stored (abstract / surveyName / countyLabel).
       const data: Record<string, string> = {
         docType: docTypeRaw, recordingDate: get(row, "recordingDate"),
         grantor: get(row, "grantor"), grantee: get(row, "grantee"),
         instrumentNumber: get(row, "instrumentNumber"), volume: get(row, "volume"), page: get(row, "page"),
         state: get(row, "state") || fallbackState || "", county: get(row, "county") || fallbackCounty || "",
-        abstractId: get(row, "abstractId"),
+        abstractId: get(row, "abstractId"), survey: get(row, "survey"),
+        ...geoView(g),
       };
       const cls = classifyDocType(docTypeRaw);
       if (!cls) { record(i, "REJECTED", docTypeRaw ? `Not mineral-related: "${docTypeRaw}"` : "Missing document type", data); continue; }
@@ -275,9 +263,9 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       }
       const recordingDate = parseRecordDate(get(row, "recordingDate"));
       if (!recordingDate) { record(i, "REJECTED", "Missing or unreadable recording date", data); continue; }
-      // Geography from mapped columns, else the file-level assigned fallback.
-      const rowState = get(row, "state") ? normState(get(row, "state")) : fallbackState;
-      const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
+      // Geography from mapped columns / legal description, else the file-level assigned fallback.
+      const rowState = g.state;
+      const rowCounty = g.county;
       if (!rowState || !rowCounty) { record(i, "REJECTED", "Missing county/state (assign one for this file)", data); continue; }
       const instrumentNumber = get(row, "instrumentNumber") || null;
       // Clean names, grouping keys, individual participants (strict split on
@@ -287,7 +275,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       const { grantorNorm, granteeNorm } = pf;
       const volume = get(row, "volume") || null;
       const page = get(row, "page") || null;
-      const abstractId = get(row, "abstractId") || null;
+      const abstractId = g.abstractId;
       const key = documentDedupeKey({
         state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType,
         grantorNorm, granteeNorm, volume, page, abstractId, interests: interestSignature(pf.partyInterests),
@@ -296,7 +284,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       if (seenInFile.has(key)) { record(i, "DUPLICATE", REASON_IN_FILE, data); continue; }
       seenInFile.add(key);
       record(i, "IMPORTED", null, data);
-      batch.push({
+      const doc: Prisma.ResearchDocumentCreateManyInput = {
         organizationId: org, state: rowState, county: rowCounty,
         docTypeRaw, docType: cls.docType, docClass: cls.docClass,
         instrumentNumber, volume, page,
@@ -310,10 +298,15 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         partyRulesVersion: PARTY_RULES_VERSION,
         ...(pf.partyInterests.length ? { partyInterests: pf.partyInterests as unknown as Prisma.InputJsonValue } : {}),
         abstractId,
-        abstractIds: splitAbstracts(abstractId), // each abstract independently filterable
+        abstractIds: g.abstractIds, // each abstract number independently filterable
+        survey: g.survey,
+        legalDescription: g.legalDescription,
         source, ingestRunId: runId,
-      });
+      };
+      batch.push(doc);
+      wantSurvey(g, (survey) => { doc.survey = survey; data.surveyName = survey; });
     }
+    await fillSurveys();
     if (dryRun) {
       imported = batch.length;
     } else {
@@ -380,15 +373,18 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const operator = get(row, "operator");
+      const g = geoOf(row);
       const data: Record<string, string> = {
         operator, apiNumber: get(row, "apiNumber"), permitNumber: get(row, "permitNumber"),
         leaseName: get(row, "leaseName"), wellName: get(row, "wellName"), status: get(row, "status"),
         filedDate: get(row, "filedDate"), approvedDate: get(row, "approvedDate"),
         state: get(row, "state") || fallbackState || "", county: get(row, "county") || fallbackCounty || "",
+        abstractId: get(row, "abstractId"), survey: get(row, "survey"),
+        ...geoView(g),
       };
       if (!operator) { record(i, "REJECTED", "Missing operator", data); continue; }
-      const rowState = get(row, "state") ? normState(get(row, "state")) : fallbackState;
-      const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
+      const rowState = g.state;
+      const rowCounty = g.county;
       if (!rowState || !rowCounty) { record(i, "REJECTED", "Missing county/state (assign one for this file)", data); continue; }
       const filedDate = parseRecordDate(get(row, "filedDate"));
       const approvedDate = parseRecordDate(get(row, "approvedDate"));
@@ -404,7 +400,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         status: classifyPermitStatus(get(row, "status")), trajectory: classifyTrajectory(get(row, "trajectory")),
         filedDate, approvedDate, spudDate, completionDate,
         field: get(row, "field") || null,
-        totalDepth: numOf(get(row, "totalDepth")), abstractId: get(row, "abstractId") || null,
+        totalDepth: numOf(get(row, "totalDepth")), abstractId: g.abstractId,
         latitude: numOf(get(row, "latitude")), longitude: numOf(get(row, "longitude")),
       };
       if (apiNumber || permitNumber) {
@@ -421,6 +417,8 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
               activityDate, filedDate, approvedDate, spudDate, completionDate,
               field: incoming.field, totalDepth: incoming.totalDepth,
               abstractId: incoming.abstractId, latitude: incoming.latitude, longitude: incoming.longitude,
+              // A survey the file names replaces the stored one; none keeps it.
+              ...(g.survey ? { survey: g.survey } : {}),
             },
           });
           byIdentity.set(idk, { ...incoming, id: found.id });
@@ -434,7 +432,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         fullSigs.add(sig);
       }
       record(i, "IMPORTED", null, data);
-      batch.push({
+      const permit: Prisma.ResearchPermitCreateManyInput = {
         organizationId: org, state: rowState, county: rowCounty,
         apiNumber, permitNumber, operator, operatorNorm: incoming.operatorNorm,
         leaseName: incoming.leaseName, wellName: incoming.wellName,
@@ -443,10 +441,14 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         field: incoming.field,
         totalDepth: incoming.totalDepth,
         abstractId: incoming.abstractId,
+        survey: g.survey,
         latitude: incoming.latitude, longitude: incoming.longitude,
         source, ingestRunId: runId,
-      });
+      };
+      batch.push(permit);
+      wantSurvey(g, (survey) => { permit.survey = survey; data.surveyName = survey; });
     }
+    await fillSurveys();
     if (dryRun) {
       imported = batch.length;
       // `updated` is already counted via record(); nothing is written on a dry run.
@@ -481,5 +483,6 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     skipped: duplicates, failed: rejected,
     skippedReasons: [...skippedReasons.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count).slice(0, 10),
     dryRun,
+    ...(previewRows > 0 ? { preview: review.slice(0, previewRows).map((r) => ({ rowIndex: r.rowIndex, outcome: r.outcome, reason: r.reason ?? null, data: r.data as Record<string, string> })) } : {}),
   };
 }

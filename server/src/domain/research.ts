@@ -1,4 +1,5 @@
 import { monthKey } from "./dates.js";
+import { abstractNumbers } from "./researchGeo.js";
 /**
  * Research & Market Intelligence — pure domain logic.
  *
@@ -590,20 +591,12 @@ export function interestSignature(interests: PartyInterest[] | null | undefined)
  * County exports list every abstract a tract touches in one cell ("15, 47,
  * 209"; some clerks use ";"). The record stays ONE transaction — the raw cell
  * is kept for display — but each number is stored separately so filtering or
- * searching for any single abstract finds it. Mirrors the migration backfill
- * (split on , or ; then trim), so old and new rows filter identically.
+ * searching for any single abstract finds it. Each is the abstract NUMBER
+ * ("A-923" → "923", researchGeo.abstractNumbers); older rows are brought to
+ * the same form by the boot backfill, so old and new rows filter identically.
  */
 export function splitAbstracts(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const part of String(raw).split(/[,;]+/)) {
-    const p = part.trim();
-    if (!p || seen.has(p)) continue;
-    seen.add(p);
-    out.push(p);
-  }
-  return out;
+  return abstractNumbers(raw);
 }
 
 // ---------------------------------------------------------------------------

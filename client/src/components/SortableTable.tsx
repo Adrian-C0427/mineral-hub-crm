@@ -31,6 +31,9 @@ export interface Column<T> {
   /** Added after users may already have saved a layout for this table: a
    *  browser layout saved before `known` was tracked never saw it. */
   newlyAdded?: boolean;
+  /** A column added later that a customized layout should SHOW when it first
+   *  sees it (others start hidden there): one the user asked for by name. */
+  revealWhenNew?: boolean;
   /** Was hidden by default in an earlier version. A browser layout hiding
    *  exactly those columns held the old defaults — not a user choice — so it
    *  is treated as never customized (the current defaults apply). */
@@ -149,7 +152,7 @@ function legacyCustomized<T>(id: string, columns: Column<T>[]): ColPrefs | null 
 /** A customized layout keeps its choices; columns it has never seen start hidden. */
 function reconcileColPrefs<T>(p: ColPrefs, columns: Column<T>[]): ColPrefs {
   const known = new Set(p.known ?? columns.filter((c) => !c.newlyAdded).map((c) => c.key));
-  const unseen = columns.filter((c) => !c.required && !known.has(c.key) && !p.hidden.includes(c.key)).map((c) => c.key);
+  const unseen = columns.filter((c) => !c.required && !c.revealWhenNew && !known.has(c.key) && !p.hidden.includes(c.key)).map((c) => c.key);
   return { ...p, customized: true, hidden: [...p.hidden, ...unseen], known: [...new Set([...known, ...columns.map((c) => c.key)])] };
 }
 const MIN_COL_W = 64;

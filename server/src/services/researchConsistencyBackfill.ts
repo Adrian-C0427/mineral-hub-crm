@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { PARTY_RULES_VERSION, documentPartyFields, parsePartyCell } from "../domain/research.js";
 import { normState, titleCounty } from "../domain/researchIngest.js";
 import { nameSimilarity } from "../domain/researchBuyers.js";
+import { backfillResearchGeoFields } from "./researchGeoFill.js";
 
 /**
  * One-time, idempotent cleanup of research records and buyer profiles imported
@@ -159,13 +160,16 @@ export async function backfillBuyerGroupAliases(db: Db = prisma): Promise<number
   return updated;
 }
 
-/** Boot entry point: all three passes, counts logged. */
+/** Boot entry point: all passes, counts logged. */
 export async function backfillResearchConsistency(): Promise<void> {
   const geography = await backfillResearchGeography();
+  // Abstract numbers + survey names (services/researchGeoFill.ts), after the
+  // county names they key on are normalized.
+  const geoFields = await backfillResearchGeoFields();
   const participants = await backfillResearchParticipants();
   const aliases = await backfillBuyerGroupAliases();
-  if (geography || participants || aliases) {
+  if (geography || geoFields || participants || aliases) {
     // eslint-disable-next-line no-console
-    console.log(`[research] consistency backfill: ${geography} geography row(s), ${participants} participant row(s), ${aliases} buyer alias list(s) updated`);
+    console.log(`[research] consistency backfill: ${geography} geography row(s), ${geoFields} abstract/survey row(s), ${participants} participant row(s), ${aliases} buyer alias list(s) updated`);
   }
 }

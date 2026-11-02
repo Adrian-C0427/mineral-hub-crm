@@ -26,16 +26,18 @@ export const DOCUMENT_FIELDS: ResearchField[] = [
   { key: "instrumentNumber", label: "Instrument / Document #" },
   { key: "volume", label: "Volume" },
   { key: "page", label: "Page" },
+  // Location: three separate fields (domain/researchGeo.ts) plus the state. A
+  // file with one combined location column maps it to each of them — every
+  // field takes only its own part. (Legal Description stays out of the import.)
+  { key: "abstractId", label: "Abstract" },
+  { key: "survey", label: "Survey Name" },
   { key: "county", label: "County" },
   { key: "state", label: "State" },
-  { key: "abstractId", label: "Abstract" },
 ];
 
 /** Canonical fields for drilling-permit imports. */
 export const PERMIT_FIELDS: ResearchField[] = [
   { key: "operator", label: "Operator", required: true },
-  { key: "county", label: "County" },
-  { key: "state", label: "State" },
   { key: "apiNumber", label: "API Number" },
   { key: "permitNumber", label: "Permit Number" },
   { key: "leaseName", label: "Lease Name" },
@@ -49,6 +51,9 @@ export const PERMIT_FIELDS: ResearchField[] = [
   { key: "field", label: "Field" },
   { key: "totalDepth", label: "Total Depth" },
   { key: "abstractId", label: "Abstract" },
+  { key: "survey", label: "Survey Name" },
+  { key: "county", label: "County" },
+  { key: "state", label: "State" },
   { key: "latitude", label: "Latitude" },
   { key: "longitude", label: "Longitude" },
 ];
@@ -75,9 +80,10 @@ export const CSV_DOCUMENTS: ResearchSource = {
     instrumentNumber: ["docnumber", "documentnumber", "documentno", "instrumentnumber", "instrumentno", "clerkfilenumber", "clerkfileno", "filenumber", "docno"],
     volume: ["bookvolumepage", "volume", "vol", "book"],
     page: ["page", "pg"],
-    county: ["county", "countyname"],
+    county: ["county", "countyname", "cnty", "parish"],
     state: ["state", "st", "statecode", "statename", "stateabbr", "stateabbreviation", "province"],
     abstractId: ["abstract", "abstractno", "abstractnumber", "abst"],
+    survey: ["survey", "surveyname", "surveys", "surv"],
   },
 };
 
@@ -85,7 +91,7 @@ export const CSV_PERMITS: ResearchSource = {
   kind: "PERMITS",
   aliases: {
     operator: ["operator", "operatorname", "operatornamenumber", "company", "companyname"],
-    county: ["county", "countyname"],
+    county: ["county", "countyname", "cnty", "parish"],
     state: ["state", "st", "statecode", "statename", "stateabbr", "stateabbreviation", "province"],
     apiNumber: ["apinumber", "apino", "api", "apiuniqueno", "api10", "api14"],
     permitNumber: ["permitnumber", "permitno", "statuspermitno", "permit"],
@@ -100,6 +106,7 @@ export const CSV_PERMITS: ResearchSource = {
     field: ["field", "fieldname"],
     totalDepth: ["totaldepth", "td", "depthtotal", "permitteddepth"],
     abstractId: ["abstract", "abst", "abstractno"],
+    survey: ["survey", "surveyname", "surveys", "surv"],
     latitude: ["latitude", "lat", "surfacelatitude", "surfacelat", "lat83"],
     longitude: ["longitude", "long", "lon", "surfacelongitude", "surfacelong", "long83"],
   },
