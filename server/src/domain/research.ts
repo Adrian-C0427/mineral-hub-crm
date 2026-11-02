@@ -158,17 +158,20 @@ const PCT_RE = new RegExp(
   `${INTEREST_LEAD}(?<![\\w.])(?<num>\\d{1,3}(?:\\.\\d+)?|\\.\\d+)\\s*(?:%|(?:PCT|PERCENT|PER\\s+CENT)\\b\\.?)(?:${TAIL_WORD}|${TAIL_TO_END})?`,
   "gi",
 );
-/** "1/2" — only as a share: followed by an interest word or ending the party
- *  (never a date like 1/2/2019, never "A/B" party separators). */
+/** "1/2", "1/3rd", "10/19ths" — only as a share: followed by an interest word
+ *  or ending the party (never a date like 1/2/2019, never "A/B" party separators). */
 const FRACTION_RE = new RegExp(
-  `${INTEREST_LEAD}(?<![\\w./])(?<n>\\d{1,4})\\s*\\/\\s*(?<d>\\d{1,5})(?![\\d/]|\\s*\\/)(?:${TAIL_WORD}|${TAIL_TO_END}|${AT_END})`,
+  `${INTEREST_LEAD}(?<![\\w./])(?<n>\\d{1,4})\\s*\\/\\s*(?<d>\\d{1,5})(?:(?:ST|ND|RD|TH)S?\\b)?(?![\\d/]|\\s*\\/)(?:${TAIL_WORD}|${TAIL_TO_END}|${AT_END})`,
   "gi",
 );
+
+/** A bracket a removed share left with nothing in it: "()", "( , )". */
+const EMPTY_BRACKETS_RE = /[([][\s,;]*[)\]]/g;
 
 /** Tidy what is left of a name once the share is removed. */
 function tidyPartyName(s: string): string {
   return s
-    .replace(/[([]\s*[)\]]/g, " ")            // "ABC LLC ()" → "ABC LLC"
+    .replace(EMPTY_BRACKETS_RE, " ")          // "ABC LLC ()" → "ABC LLC"
     .replace(/\s+/g, " ")
     .replace(/^[\s,;:\-–—]+|[\s,;:\-–—]+$/g, "")  // "ABC LLC –" → "ABC LLC"
     .replace(/\s+(?:AS\s+TO|OF)$/i, "")
@@ -180,8 +183,10 @@ function tidyPartyName(s: string): string {
  *   "ABC Minerals LLC – 50% interest" → { name: "ABC Minerals LLC", pct: 50, text: "50% interest" }
  *   "ABC Minerals LLC (1/2 MI)"       → { name: "ABC Minerals LLC", pct: 50, text: "1/2 MI" }
  *   "ABC Minerals LLC"                → { name: "ABC Minerals LLC", pct: null, text: null }
- * Only shares in (0, 100] count; anything else is left untouched. When a name
- * carries several shares the first is the value and all are kept in `text`.
+ * Only shares in [0, 100] count (a party recorded at "0%" is on the deed with
+ * no share); anything else is left untouched. When a name carries several
+ * shares — "(1/3) (33.3333%)", "(33.33%, 1/3rd)" — the first is the value and
+ * all are kept in `text`.
  */
 export function extractInterest(raw: string | null | undefined): { name: string; pct: number | null; text: string | null } {
   const src = raw ?? "";
@@ -189,13 +194,16 @@ export function extractInterest(raw: string | null | undefined): { name: string;
   let pct: number | null = null;
   const texts: string[] = [];
   const take = (m: string, v: number) => {
-    if (!(v > 0 && v <= 100)) return m;
+    if (!(v >= 0 && v <= 100)) return m;
     if (pct == null) pct = round4(v);
     texts.push(m.replace(/^[\s([]+|[\s)\]]+$/g, ""));
     return " ";
   };
   let name = src.replace(PCT_RE, (m: string, ...rest: unknown[]) =>
     take(m, parseFloat((rest[rest.length - 1] as { num: string }).num)));
+  // A bracket the percent emptied no longer stands between a fraction and the
+  // end of the party: "ABC LLC (1/3) (33.3333%)".
+  if (texts.length) name = name.replace(EMPTY_BRACKETS_RE, " ");
   name = name.replace(FRACTION_RE, (m: string, ...rest: unknown[]) => {
     const g = rest[rest.length - 1] as { n: string; d: string };
     const n = Number(g.n), d = Number(g.d);
@@ -261,8 +269,67 @@ export interface ParsedParty {
  *   4 — once a legal form has closed a party, what follows it is OTHER parties
  *       even without legal forms of their own ("EIGHT ROW HOLDINGS LLC & EIGHT
  *       ROW HOLDINGS & BOYD PATRICK" is three).
+ *   5 — separators inside brackets never split a cell ("(by John Smith,
+ *       Member)", "(33.33%, 1/3rd)", "(C/O JANE DOE, TRUSTEE)"); signer and
+ *       care-of brackets leave the party; a party with its own share closes it
+ *       at an "&"; a "[66% TOTAL]" tag is not a share; a "0%" share, an
+ *       ordinal fraction ("1/3rd") and a fraction beside its percent
+ *       ("(1/3) (33.3333%)") are shares; the same party named twice with a
+ *       share each holds both; shares that round to 100% total 100%.
  */
-export const PARTY_RULES_VERSION = 4;
+export const PARTY_RULES_VERSION = 5;
+
+/**
+ * The text with everything inside balanced (…) / […] pairs masked, same
+ * length, so a separator search sees only the top level. An opening bracket
+ * that never closes masks nothing, and neither does a bracket holding several
+ * shares — that is a list of parties ("ABC INC ET AL (85%/JOHN DOE 5%/…)").
+ */
+function maskBrackets(s: string): string {
+  const chars = s.split("");
+  const open: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(" || s[i] === "[") open.push(i);
+    else if ((s[i] === ")" || s[i] === "]") && open.length) {
+      const from = open.pop()!;
+      if ((s.slice(from + 1, i).match(/\d\s*%/g) ?? []).length > 1) continue;
+      for (let j = from + 1; j < i; j++) chars[j] = "_";
+    }
+  }
+  return chars.join("");
+}
+
+/** A closing bracket with no opener left behind by a split ("HELEN LOKEY 5%)"). */
+function dropStrayClosers(s: string): string {
+  let depth = 0;
+  let out = "";
+  for (const ch of s) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") {
+      if (!depth) continue;
+      depth--;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** `s` split at `re` outside brackets; with `keep`, the separators are kept between the pieces (like split with a capture group). */
+function splitOutsideBrackets(s: string, re: RegExp, keep = false): string[] {
+  const out: string[] = [];
+  let last = 0;
+  for (const m of maskBrackets(s).matchAll(new RegExp(re.source, re.flags.replace("g", "") + "g"))) {
+    if (!m[0]) continue;
+    out.push(s.slice(last, m.index));
+    if (keep) out.push(s.slice(m.index, m.index + m[0].length));
+    last = m.index + m[0].length;
+  }
+  out.push(s.slice(last));
+  return out;
+}
+
+/** "[66% TOTAL]" / "(TOTAL 66%)": a sum of the shares already listed, not a share of its own. */
+const SHARE_TOTAL_RE = /[([]\s*(?:\d{1,3}(?:\.\d+)?\s*%\s*TOTAL|TOTAL\s*:?\s*\d{1,3}(?:\.\d+)?\s*%)\s*[)\]]/gi;
 
 /** Legal-form words that mark a text as a COMPLETE organisation name. */
 const LEGAL_FORM_RE = /\b(?:L\.?L\.?C|L\.?P|L\.?L\.?P|LTD|INC(?:ORPORATED)?|CORP(?:ORATION)?|CO|COMPANY|LC|PLLC|TRUST|PARTNERSHIP|ESTATE|FOUNDATION|BANK|CHURCH|ASSOCIATION|ASSN|UNIVERSITY|COLLEGE)\.?\b/i;
@@ -284,7 +351,8 @@ const LEGAL_FORM_END_RE = new RegExp(`${LEGAL_FORM_RE.source}\\s*$`, "i");
  */
 function splitAmpersand(part: string): string[] {
   // Keep the separators as written so a rebuilt name reads as the record did.
-  const bits = part.split(/(\s*(?:&|\bAND\b)\s*)/i);
+  // An "&" inside brackets ("(by John & Mary Smith)") is part of the annotation.
+  const bits = splitOutsideBrackets(part, /\s*(?:&|\bAND\b)\s*/i, true);
   if (bits.length < 3) return [part];
   const pieces: string[] = [];
   const seps: string[] = [];
@@ -295,10 +363,13 @@ function splitAmpersand(part: string): string[] {
     seps.push(bits[i - 1] ?? "");
   }
   // The legal form closes the NAME; a share, annotation or role written after
-  // it ("… LP (2/3)", "… LLC, Trustee") doesn't keep the party open.
+  // it ("… LP (2/3)", "… LLC, Trustee") doesn't keep the party open. A share
+  // of its own closes a party too: "JAMES RYAN CAIN (17.5%) & MULTIPLIED
+  // CAPITAL INC (12.5%)" is two grantees, each with its share.
   const closes = pieces.map((p) => {
-    const bare = stripRole(extractAnnotations(extractInterest(p).name).name);
-    return /[A-Za-z]/.test(bare) && LEGAL_FORM_END_RE.test(bare);
+    const ex = extractInterest(p);
+    const bare = stripRole(extractAnnotations(ex.name).name);
+    return /[A-Za-z]/.test(bare) && (LEGAL_FORM_END_RE.test(bare) || ex.pct != null);
   });
   if (!closes.some(Boolean)) return [part];
   // Text before a legal form belongs to that name ("BROADMOOR LAND & MINERALS
@@ -340,18 +411,22 @@ function stripRole(name: string): string {
 /** Bracketed text that only restates the conveyed interest once the share itself is gone. */
 const INTEREST_REMNANT_WORDS = new Set(["OF", "THE", "GRANTOR", "GRANTORS", "GRANTOR'S", "GRANTEE", "GRANTEES", "INTEREST", "INTERESTS", "INT", "UNDIVIDED", "MI", "RI", "MINERAL", "MINERALS", "ROYALTY", "S", "AN", "A", "IN", "AND", "TO", "ALL"]);
 const ACRES_RE = /(\d+(?:\.\d+)?)\s*(?:NET\s+MINERAL\s+ACRES?|NET\s+ROYALTY\s+ACRES?|NMA|NRA|ACRES?|AC\.?)\b/i;
+/** Who signed for the party, or receives its mail: "(by John Smith, Member)", "(C/O JANE DOE)". */
+const SIGNER_RE = /^(?:BY|C\s*\/\s*O|CARE\s+OF)\b/i;
 
 /**
  * Bracketed annotations leave the name. An acreage ("(40.00 net mineral
  * acres)") is kept as data; the empty shell a removed share leaves behind
- * ("( of Grantor's interest)") is dropped; anything else is kept as a note.
+ * ("( of Grantor's interest)") and a signer or care-of line are dropped;
+ * anything else is kept as a note.
  */
 function extractAnnotations(name: string): { name: string; acres: number | null; note: string | null } {
   let acres: number | null = null;
   const notes: string[] = [];
   const take = (inner: string): string => {
-    inner = inner.trim();
-    if (!inner) return " ";
+    // What a removed share leaves around a remark: "(49.1%, retained)" → "retained".
+    inner = inner.replace(/^[\s,;:\-–—]+|[\s,;:\-–—]+$/g, "");
+    if (!inner || SIGNER_RE.test(inner)) return " ";
     const m = ACRES_RE.exec(inner);
     if (m) { if (acres == null) acres = Number(m[1]); return " "; }
     const words = inner.toUpperCase().replace(/[^A-Z0-9' ]+/g, " ").split(/\s+/).filter(Boolean);
@@ -368,7 +443,7 @@ function extractAnnotations(name: string): { name: string; acres: number | null;
 
 /** One part of a cell, fully cleaned: share, annotations and role words removed. */
 function cleanPart(part: string): { name: string; pct: number | null; text: string | null; acres: number | null; note: string | null } {
-  const ex = extractInterest(part);
+  const ex = extractInterest(dropStrayClosers(part));
   const an = extractAnnotations(ex.name);
   return { name: stripRole(an.name), pct: ex.pct, text: ex.text, acres: an.acres, note: an.note };
 }
@@ -393,8 +468,9 @@ const PARTY_SEPARATOR = /(?:[,;]|(?<!\d\s*)\/(?!\s*\d))+/;
  * called "LLC".
  *
  * Parts that normalize to nothing are dropped; parts that normalize to the
- * same entity key are de-duplicated (first spelling wins). `hasInterest` is
- * true when any interest text was found in the cell.
+ * same entity key are de-duplicated (first spelling wins, shares add up).
+ * Separators inside brackets never split. `hasInterest` is true when any
+ * interest text was found in the cell.
  */
 /** Words that mark a part as an organisation, not a person's given names. */
 const ENTITY_WORDS = /\b(TRUST|ESTATE|HEIRS|RANCH|MINERALS?|ROYALT(?:Y|IES)|PARTNERS(?:HIP)?|ENERGY|RESOURCES|OIL|GAS|LAND|HOLDINGS?|FUND|BANK|CHURCH|FAMILY|INVESTMENTS?|PROPERTIES|GROUP|CAPITAL|ASSOCIATES|ACQUISITIONS?|VENTURES?|FARMS?|CATTLE|INC|LLC|LP|LTD|CORP|CO|COMPANY|TRUSTEE|TRUSTEES|DECD|DECEASED)\b/;
@@ -408,10 +484,12 @@ const ENTITY_WORDS = /\b(TRUST|ESTATE|HEIRS|RANCH|MINERALS?|ROYALT(?:Y|IES)|PART
  * and "Blackrock Minerals, LLC" (a suffix) still follow the separator rules.
  */
 function isSurnameFirstPerson(raw: string): boolean {
-  const parts = raw.split(",");
-  if (parts.length !== 2 || /[;/]/.test(raw)) return false;
+  // Judged on the top level only: "GARCIA, MARIA (50%)" is still one person.
+  const top = maskBrackets(raw);
+  const parts = splitOutsideBrackets(raw, /,/);
+  if (parts.length !== 2 || /[;/]/.test(top)) return false;
   const [last, given] = parts.map((x) => x.trim());
-  if (!last || !given || /\d/.test(raw)) return false;
+  if (!last || !given || /\d/.test(top)) return false;
   const words = (x: string) => x.toUpperCase().replace(/[^A-Z' ]+/g, " ").split(/\s+/).filter(Boolean);
   const lastWords = words(last);
   const givenWords = words(given).filter((w) => !["ET", "UX", "AL", "VIR", "ETUX", "ETAL", "ETVIR", "JR", "SR", "II", "III", "IV"].includes(w));
@@ -427,10 +505,11 @@ export function parsePartyCell(raw: string | null | undefined): { parties: Parse
   let hasInterest = false;
   let leading: { pct: number; text: string | null } | null = null;
   // A role written after the whole cell ("THOMPSON, ROBERT, TRUSTEE") goes
-  // first, so the surname-first shape underneath is still recognised.
-  const cell = stripRole(String(raw));
+  // first, so the surname-first shape underneath is still recognised. A
+  // "[66% TOTAL]" tag sums the shares listed; it is no share of its own.
+  const cell = stripRole(String(raw).replace(SHARE_TOTAL_RE, " "));
   if (!cell) return { parties: [], hasInterest: false };
-  const parts = (isSurnameFirstPerson(cell) ? [cell] : cell.split(PARTY_SEPARATOR)).flatMap(splitAmpersand);
+  const parts = (isSurnameFirstPerson(cell) ? [cell] : splitOutsideBrackets(cell, PARTY_SEPARATOR)).flatMap(splitAmpersand);
   for (const part of parts) {
     const ex = cleanPart(part);
     if (ex.pct != null) hasInterest = true;
@@ -450,7 +529,12 @@ export function parsePartyCell(raw: string | null | undefined): { parties: Parse
     }
     const seen = byNorm.get(norm);
     if (seen) {
-      if (seen.pct == null && ex.pct != null) { seen.pct = ex.pct; seen.text = ex.text; }
+      // Named again with a share of its own ("HUFFMAN BECKY TRUSTEE (A TRUST)
+      // (20%); HUFFMAN BECKY TRUSTEE (B TRUST) (20%)"): the party holds both.
+      if (ex.pct != null) {
+        seen.pct = seen.pct == null ? ex.pct : round4(seen.pct + ex.pct);
+        seen.text = seen.text ? `${seen.text}; ${ex.text}` : ex.text;
+      }
       if (seen.acres == null && ex.acres != null) seen.acres = ex.acres;
       continue;
     }
@@ -519,12 +603,17 @@ const round4 = (n: number) => Math.round(n * 10000) / 10000;
  * The single "interest conveyed" figure for a document: the stated share, or
  * the total when several parties on ONE side each state theirs ("A 50%; B 50%"
  * → 100). When both sides state shares they must agree, else it is ambiguous
- * (null) and only the per-party detail is kept. Never above 100.
+ * (null) and only the per-party detail is kept. Never above 100. Shares
+ * written to a few decimals add to a hair either side of the whole ("16.67%"
+ * six times is 100.02%): within ROUNDING of 100 the total IS 100.
  */
+const ROUNDING = 0.05;
 export function documentInterestPct(interests: PartyInterest[]): number | null {
   const total = (side: PartyInterest["side"]) => {
     const xs = interests.filter((i) => i.side === side && i.pct != null);
-    return xs.length ? round4(xs.reduce((a, i) => a + (i.pct ?? 0), 0)) : null;
+    if (!xs.length) return null;
+    const sum = round4(xs.reduce((a, i) => a + (i.pct ?? 0), 0));
+    return Math.abs(sum - 100) <= ROUNDING ? 100 : sum;
   };
   const g = total("GRANTOR"), t = total("GRANTEE");
   const v = g != null && t != null ? (g === t ? g : null) : g ?? t;
@@ -549,7 +638,7 @@ export function documentPartyFields(grantorRaw: string | null | undefined, grant
     const names = parties.map((p) => p.name);
     const joined = names.join("; ");
     // Separators alone don't count as a change ("A, B" stays as recorded).
-    const rawParts = cell ? cell.split(PARTY_SEPARATOR).map((t) => t.trim()).filter(Boolean) : [];
+    const rawParts = cell ? splitOutsideBrackets(cell, PARTY_SEPARATOR).map((t) => t.trim()).filter(Boolean) : [];
     const changed = cell != null && joined !== cell.trim() && (rawParts.length !== names.length || rawParts.some((t, i) => t !== names[i]));
     const clean = changed ? joined || null : cell;
     return {
