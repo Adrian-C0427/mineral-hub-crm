@@ -180,6 +180,34 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     for (const f of surveyFills) { const s = surveysFor(lookup, f.county, f.abstractNos); if (s) f.set(s); }
   };
 
+  // Geography once per row, and from it the file's footprint: the states and
+  // counties its rows fall in and, for documents, their recording-date span.
+  // Existing records are read for that footprint only — both dedupe keys
+  // carry state + county (a document's its recording day too), so nothing
+  // outside it can match, and neither an import nor its preview reads the
+  // org's whole table. Case-insensitive, as the keys compare upper-cased.
+  const geos = rows.map(geoOf);
+  const docDates = kind === "DOCUMENTS" ? rows.map((r) => parseRecordDate(get(r, "recordingDate"))) : [];
+  const utcDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const DAY = 86_400_000;
+  const footprint = () => {
+    const states = new Set<string>(), counties = new Set<string>();
+    let from: Date | null = null, to: Date | null = null;
+    for (let i = 0; i < geos.length; i++) {
+      const g = geos[i];
+      const date = kind === "DOCUMENTS" ? docDates[i] : undefined;
+      if (!g.state || !g.county || date === null) continue; // rejected before any dedupe
+      states.add(g.state); counties.add(g.county);
+      if (date) { if (!from || date < from) from = date; if (!to || date > to) to = date; }
+    }
+    if (!states.size) return null;
+    return {
+      state: { in: [...states], mode: "insensitive" as const }, county: { in: [...counties], mode: "insensitive" as const },
+      // Keys compare the UTC day; stored dates may carry a time, so whole days.
+      ...(from && to ? { recordingDate: { gte: utcDay(from), lt: new Date(utcDay(to).getTime() + DAY) } } : {}),
+    };
+  };
+
   let imported = 0, updated = 0, duplicates = 0, rejected = 0;
   const skippedReasons = new Map<string, number>();
   const countReason = (reason: string) => skippedReasons.set(reason, (skippedReasons.get(reason) ?? 0) + 1);
@@ -218,15 +246,16 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     // Party keys + conveyed interests are re-derived from each stored cell AS
     // RECORDED, exactly as an incoming row is — so the comparison never depends
     // on whether an older record has been through the interest backfill yet.
+    const scope = footprint();
     const existingKeys = new Set(
-      (await prisma.researchDocument.findMany({
-        where: { organizationId: org },
+      (scope ? await prisma.researchDocument.findMany({
+        where: { organizationId: org, ...scope },
         select: {
           instrumentNumber: true, county: true, state: true, recordingDate: true, docType: true,
           grantor: true, grantee: true, grantorAsRecorded: true, granteeAsRecorded: true,
           volume: true, page: true, abstractId: true,
         },
-      })).map((r) => {
+      }) : []).map((r) => {
         const pf = documentPartyFields(r.grantorAsRecorded ?? r.grantor, r.granteeAsRecorded ?? r.grantee);
         return documentDedupeKey({
           state: r.state, county: r.county, instrumentNumber: r.instrumentNumber,
@@ -243,7 +272,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const docTypeRaw = get(row, "docType");
-      const g = geoOf(row);
+      const g = geos[i];
       // The mapped values, exactly as the reviewer should see them, plus the
       // location as it will be stored (abstract / surveyName / countyLabel).
       const data: Record<string, string> = {
@@ -261,7 +290,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         record(i, "REJECTED", cls.docClass === "LEASE" ? "Lease document — import under Leases" : "Deed document — import under Deeds", data);
         continue;
       }
-      const recordingDate = parseRecordDate(get(row, "recordingDate"));
+      const recordingDate = docDates[i];
       if (!recordingDate) { record(i, "REJECTED", "Missing or unreadable recording date", data); continue; }
       // Geography from mapped columns / legal description, else the file-level assigned fallback.
       const rowState = g.state;
@@ -335,15 +364,16 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       field: string | null; totalDepth: number | null; abstractId: string | null;
       latitude: number | null; longitude: number | null;
     };
-    const existingPermits = await prisma.researchPermit.findMany({
-      where: { organizationId: org },
+    const scope = footprint();
+    const existingPermits = scope ? await prisma.researchPermit.findMany({
+      where: { organizationId: org, state: scope.state, county: scope.county },
       select: {
         id: true, state: true, county: true, apiNumber: true, permitNumber: true,
         operatorNorm: true, leaseName: true, wellName: true, status: true, trajectory: true,
         filedDate: true, approvedDate: true, spudDate: true, completionDate: true,
         field: true, totalDepth: true, abstractId: true, latitude: true, longitude: true,
       },
-    });
+    }) : [];
     const identityKey = (s: string, c: string, api: string | null, permit: string | null) =>
       `${s}|${c}|${normField(api)}|${normField(permit)}`;
     const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
@@ -373,7 +403,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const operator = get(row, "operator");
-      const g = geoOf(row);
+      const g = geos[i];
       const data: Record<string, string> = {
         operator, apiNumber: get(row, "apiNumber"), permitNumber: get(row, "permitNumber"),
         leaseName: get(row, "leaseName"), wellName: get(row, "wellName"), status: get(row, "status"),
