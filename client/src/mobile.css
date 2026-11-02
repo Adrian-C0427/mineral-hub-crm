@@ -255,7 +255,10 @@
   .dash-stack.customizing .dash-w { outline: 1px dashed var(--border); outline-offset: 2px; }
   .dash-stack .dash-cz-bar { position: static; }
   .dash-cz-banner { flex-wrap: wrap; gap: 10px; }
-  .dash-task-form-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  /* Task form: the property rows' controls take the row's remaining width. */
+  .tf-prop { grid-template-columns: 112px minmax(0, 1fr); }
+  .tf-prop > .msel, .tf-seg.seg { width: 100%; }
+  .tf-dlg .tf-details { font-size: 16px; } /* no iOS focus zoom */
   .dash-task-add { width: 40px; height: 40px; }
   .dash-cz-banner .row { margin-left: 0 !important; }
 
