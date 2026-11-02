@@ -55,6 +55,10 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     // configuration lives under Settings → Buyer Portal.
     { label: "Buyer Portal", icon: pathIcon("M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"), to: "/portal-admin", perm: "publishOfferings", desc: "Your public offering marketplace" },
   ] },
+  // The member's own connected Outlook / OneDrive / Google Drive.
+  { label: "Workspace", items: [
+    { label: "Files", icon: pathIcon("M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16"), to: "/files", perm: "manageDocuments", desc: "Your OneDrive and Google Drive — browse, organize, and link files to records" },
+  ] },
   { label: "Analysis", items: [
     { label: "Map", icon: pathIcon("M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"), to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
     { label: "Research", icon: pathIcon("M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"), to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },

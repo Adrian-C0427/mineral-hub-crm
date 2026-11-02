@@ -22,6 +22,7 @@ import { PhoneInput } from "../components/PhoneInput";
 import type { BuyBox, Relationship, UserLite, UserRef } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { useUnsavedSection, guarded } from "../lib/unsaved";
+import { LinkedFilesPanel } from "../components/CloudLinks";
 
 interface BuyerProfileData {
   id: string;
@@ -447,6 +448,9 @@ export function BuyerProfile() {
           </div>
         )}
       </div>
+
+      {/* OneDrive / Google Drive files linked to this buyer (no copy kept). */}
+      {can("viewDocuments") && <LinkedFilesPanel record={{ type: "buyer", id: b.id }} canEdit={can("manageDocuments")} />}
 
       {sendDeal && <SendDealPicker buyerId={b.id} buyerName={view.companyName} onClose={() => setSendDeal(false)} onSent={load} />}
     </div>

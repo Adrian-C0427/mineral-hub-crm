@@ -255,6 +255,12 @@
   .dash-stack.customizing .dash-w { outline: 1px dashed var(--border); outline-offset: 2px; }
   .dash-stack .dash-cz-bar { position: static; }
   .dash-cz-banner { flex-wrap: wrap; gap: 10px; }
+  /* Cloud files: the browser drops its date/type columns; actions stay. */
+  .cb-row { grid-template-columns: minmax(0, 1fr) 70px auto; }
+  .cb-row .cb-kind, .cb-row .cb-date { display: none; }
+  .cb-row:has(.cb-check) { grid-template-columns: 22px minmax(0, 1fr) 70px; }
+  .cb-tools { margin-left: 0; }
+  .cl-row { flex-wrap: wrap; }
   /* Task form: the property rows' controls take the row's remaining width. */
   .tf-prop { grid-template-columns: 112px minmax(0, 1fr); }
   .tf-prop > .msel, .tf-seg.seg { width: 100%; }

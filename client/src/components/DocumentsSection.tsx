@@ -8,6 +8,9 @@ import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
 import { fmtDateLocal } from "../lib/format";
 import { Avatar } from "./kit";
+import { CloudLinksList, CloudPickerModal, CopyToDriveModal, useDriveAccounts, useRecordLinks } from "./CloudLinks";
+import { PROVIDER_LABEL } from "../lib/cloud";
+import type { ConnectedAccount } from "../lib/connectedAccounts";
 
 /**
  * The single, shared Documents section used everywhere documents are managed
@@ -126,25 +129,33 @@ export function DocumentsSection({
   const replaceRef = useRef<HTMLInputElement>(null);
   const replaceId = useRef<string | null>(null);
 
-  // Cloud import is offered only when an admin has connected Drive/OneDrive.
+  // Files linked from (or copied to) members' OneDrive / Google Drive.
+  const { links, reload: reloadLinks } = useRecordLinks({ type: ownerType, id: ownerId });
+  const driveAccounts = useDriveAccounts(canEdit);
+  const [picking, setPicking] = useState<ConnectedAccount | null>(null);
+  const [copying, setCopying] = useState<{ account: ConnectedAccount; file: DocFile } | null>(null);
+
+  // The old company-wide Drive/OneDrive import, offered only until the member
+  // connects their own drive (then CloudPickerModal replaces it).
   useEffect(() => {
-    if (!canEdit) return;
+    if (!canEdit || driveAccounts.length) { setCloudProviders([]); return; }
     api.get<CloudProvider[]>("/files/cloud/providers")
       .then((list) => setCloudProviders(list.filter((p) => p.connected)))
       .catch(() => setCloudProviders([]));
-  }, [canEdit]);
+  }, [canEdit, driveAccounts.length]);
 
   // Folders = the module's defaults, plus any folder already present that isn't a default.
   const folders = useMemo(() => {
-    const present = new Set(files.map((f) => f.folder || "Other"));
+    const present = new Set([...files.map((f) => f.folder || "Other"), ...links.map((l) => l.folder || "Other")]);
     return [...folderList, ...[...present].filter((p) => !folderList.includes(p)).sort()];
-  }, [files, folderList]);
+  }, [files, links, folderList]);
   const countByFolder = useMemo(() => {
     const m = new Map<string, number>();
-    for (const f of files) m.set(f.folder || "Other", (m.get(f.folder || "Other") ?? 0) + 1);
+    for (const f of [...files, ...links]) m.set(f.folder || "Other", (m.get(f.folder || "Other") ?? 0) + 1);
     return m;
-  }, [files]);
+  }, [files, links]);
   const inFolder = useMemo(() => files.filter((f) => (f.folder || "Other") === folder), [files, folder]);
+  const linksInFolder = useMemo(() => links.filter((l) => (l.folder || "Other") === folder), [links, folder]);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true); setErr(null);
@@ -242,6 +253,7 @@ export function DocumentsSection({
                   { label: "Rename", onClick: () => setRenaming(f) },
                   { label: "Move to folder…", onClick: () => setMoving(f) },
                   { label: "Replace file…", onClick: () => { replaceId.current = f.id; replaceRef.current?.click(); } },
+                  ...driveAccounts.map((a) => ({ label: `Copy to ${PROVIDER_LABEL[a.provider as "onedrive" | "googledrive"]}…`, onClick: () => setCopying({ account: a, file: f }) })),
                 ] : []),
                 ...(canDelete ? [{ label: "Delete", danger: true, onClick: () => run(() => api.del(`/files/${f.id}`)) }] : []),
               ]}
@@ -267,7 +279,7 @@ export function DocumentsSection({
         <div className="dpp-title">
           <div>
             <h3 style={{ margin: 0 }}>{title}</h3>
-            <div className="dpp-sub"><b className="docx-count">{files.length}</b> file{files.length === 1 ? "" : "s"} · organized by folder{canEdit ? " · drag files in to upload" : ""}</div>
+            <div className="dpp-sub"><b className="docx-count">{files.length + links.length}</b> file{files.length + links.length === 1 ? "" : "s"}{links.length ? ` (${links.length} in OneDrive/Google Drive)` : ""} · organized by folder{canEdit ? " · drag files in to upload" : ""}</div>
           </div>
         </div>
         <span className="dpp-right">
@@ -323,6 +335,11 @@ export function DocumentsSection({
         </span>
         {canEdit && (
           <div className="doc-folder-actions">
+            {driveAccounts.map((a) => (
+              <button key={a.id} className="small" disabled={busy} onClick={() => setPicking(a)} title={`Link or import files from ${a.email ?? PROVIDER_LABEL[a.provider as "onedrive" | "googledrive"]} into ${folder}`}>
+                <Cloud size={13} aria-hidden="true" />{PROVIDER_LABEL[a.provider as "onedrive" | "googledrive"]}
+              </button>
+            ))}
             {cloudProviders.map((p) => (
               <button key={p.key} className="small" disabled={busy} onClick={() => setImporting(p)} title={`Import files from ${p.name} into ${folder}`}>
                 <Cloud size={13} aria-hidden="true" />{p.name}
@@ -340,10 +357,24 @@ export function DocumentsSection({
 
       {err && <Banner kind="error">{err}</Banner>}
 
-      {inFolder.length === 0 ? (
+      {inFolder.length === 0 && linksInFolder.length === 0 ? (
         <EmptyState title={dragOver ? `Drop to upload to ${folder}` : `No documents in ${folder}`}>{dragOver ? "" : "Drag files anywhere onto this panel, or use Upload."}</EmptyState>
-      ) : (
+      ) : inFolder.length > 0 ? (
         <SortableTable columns={columns} rows={inFolder} rowKey={(f) => f.id} defaultSort={{ key: "createdAt", dir: "desc" }} />
+      ) : null}
+      {linksInFolder.length > 0 && (
+        <>
+          {inFolder.length > 0 && <div className="cl-divider">In OneDrive / Google Drive</div>}
+          <CloudLinksList links={linksInFolder} folders={folders} canEdit={canEdit} onChanged={reloadLinks} />
+        </>
+      )}
+      {picking && (
+        <CloudPickerModal account={picking} record={{ type: ownerType, id: ownerId }} folder={folder} allowImport
+          onClose={() => setPicking(null)} onDone={() => { setPicking(null); reloadLinks(); onChanged(); }} />
+      )}
+      {copying && (
+        <CopyToDriveModal account={copying.account} attachment={copying.file}
+          onClose={() => setCopying(null)} onDone={() => { setCopying(null); reloadLinks(); }} />
       )}
 
       {/* Hidden input used by per-row Replace buttons. */}

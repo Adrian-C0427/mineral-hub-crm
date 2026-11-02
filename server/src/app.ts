@@ -35,6 +35,8 @@ import { portalRouter } from "./routes/portal.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { calendarRouter } from "./routes/calendar.js";
 import { accountsRouter } from "./routes/accounts.js";
+import { cloudRouter } from "./routes/cloud.js";
+import { recordSearchRouter } from "./routes/recordSearch.js";
 
 export function createApp() {
   const app = express();
@@ -123,6 +125,8 @@ export function createApp() {
   app.use("/api/integrations", integrationsOAuthCallbackRouter);
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/accounts", accountsRouter);
+  app.use("/api/cloud", cloudRouter);
+  app.use("/api/records", recordSearchRouter);
   app.use("/api/research", researchRouter);
   app.use("/api/wells", wellsRouter);
   app.use("/api/ai", aiRouter);

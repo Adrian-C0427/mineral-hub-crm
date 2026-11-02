@@ -22,6 +22,7 @@ import { type ContactRow, TYPES, STATUSES, PREFERRED_CONTACTS, preferredContactL
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
 import { useIsPhonePortrait } from "../lib/mobile";
 import type { ContactMineralInterest, UserLite, UserRef } from "../types";
+import { LinkedFilesPanel } from "../components/CloudLinks";
 
 /**
  * Contact workspace (reference layout): left contact-details rail, center
@@ -223,6 +224,9 @@ export function ContactDetail() {
         <Tags contact={contact} canManage={canManage} onSave={(tags) => void patch({ tags })} />
 
         <FieldSections contact={contact} canManage={canManage} onSave={patch} />
+
+        {/* OneDrive / Google Drive files linked to this contact (no copy kept). */}
+        {can("viewDocuments") && <LinkedFilesPanel record={{ type: "contact", id: contact.id }} canEdit={can("manageDocuments")} />}
       </aside>
 
       {/* Phones only: quick actions + the tab strip that picks the visible pane. */}

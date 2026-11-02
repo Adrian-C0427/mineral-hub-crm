@@ -31,6 +31,7 @@ const Research = lazy(() => import("./pages/Research").then((m) => ({ default: m
 const Valuation = lazy(() => import("./pages/Valuation").then((m) => ({ default: m.Valuation })));
 // Calendar — events plus closings, follow-ups, and tasks drawn from existing records.
 const Calendar = lazy(() => import("./pages/Calendar").then((m) => ({ default: m.Calendar })));
+const Files = lazy(() => import("./pages/Files").then((m) => ({ default: m.Files })));
 // Mineral Assets (portfolio) — the detail view pulls in recharts + MapLibre.
 const MineralAssets = lazy(() => import("./pages/MineralAssets").then((m) => ({ default: m.MineralAssets })));
 const MineralAssetDetail = lazy(() => import("./pages/MineralAssetDetail").then((m) => ({ default: m.MineralAssetDetail })));
@@ -135,6 +136,7 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/pipeline" element={<Guard perm="viewDeals"><Pipeline /></Guard>} />
           <Route path="/calendar" element={<Suspense fallback={<Spinner label="Loading calendar…" />}><Calendar /></Suspense>} />
+          <Route path="/files" element={<Guard perm="manageDocuments"><Suspense fallback={<Spinner label="Loading files…" />}><Files /></Suspense></Guard>} />
           <Route path="/deals" element={<Guard perm="viewDeals"><Deals scope="all" /></Guard>} />
           <Route path="/deals/active" element={<Guard perm="viewDeals"><Deals scope="active" /></Guard>} />
           <Route path="/deals/closed" element={<Guard perm="viewDeals"><Deals scope="closed" /></Guard>} />

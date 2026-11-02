@@ -60,6 +60,20 @@ export async function getDownloadUrl(key: string, filename?: string, inline = fa
   return getSignedUrl(client, cmd, { expiresIn: env.S3.SIGNED_URL_TTL_SECONDS });
 }
 
+/**
+ * A stored object's bytes (for server-side copies: a document copied to a
+ * member's drive, or attached to an Outlook email). Refuses anything larger
+ * than `maxBytes` before reading it into memory.
+ */
+export async function getObjectBytes(key: string, maxBytes: number): Promise<Buffer> {
+  if (!client) throw new Error("S3 is not configured");
+  const out = await client.send(new GetObjectCommand({ Bucket: env.S3.BUCKET, Key: key }));
+  if (out.ContentLength != null && out.ContentLength > maxBytes) throw new Error("Stored file is larger than allowed here.");
+  const bytes = Buffer.from(await out.Body!.transformToByteArray());
+  if (bytes.length > maxBytes) throw new Error("Stored file is larger than allowed here.");
+  return bytes;
+}
+
 export async function deleteObject(key: string): Promise<void> {
   if (!client) return;
   await client.send(new DeleteObjectCommand({ Bucket: env.S3.BUCKET, Key: key }));
