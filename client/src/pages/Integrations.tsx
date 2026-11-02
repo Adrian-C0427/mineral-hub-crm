@@ -1,23 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Mail, Bot, HardDrive, Calendar, ShieldCheck,
-  Users, Cloud, Send, MessageSquare, type LucideIcon,
-} from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { KeyRound, LogOut, RefreshCw, RotateCcw, Settings2, Tags } from "lucide-react";
 import { api, ApiError } from "../api/client";
-import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog, OverflowMenu } from "../components/ui";
 import { Select } from "../components/Select";
-import { fmtDateTime } from "../lib/format";
+import { fmtDate, fmtDateTime } from "../lib/format";
 import { SettingsLayout } from "../components/SettingsNav";
 import { Segmented, Tag } from "../components/kit";
 import { useHighLevelStatus, HighLevelSummary, HighLevelConnectModal, HighLevelConfigureModal } from "../components/HighLevelIntegration";
-import { ConnectedAccountsSection, TeamConnections } from "../components/ConnectedAccounts";
-import { useConnectedAccounts } from "../lib/connectedAccounts";
+import { PERSONAL_META, PersonalProviderRow, personalStatus, TeamConnections, usePersonalAccounts } from "../components/ConnectedAccounts";
+import { CATEGORY_ORDER, IntegrationGroup, IntegrationRow, type RowTone } from "../components/IntegrationRow";
+import { useConnectedAccounts, type AccountProvider, type AccountProviderInfo } from "../lib/connectedAccounts";
+import { HL_SYNC_EVERY, type HighLevelStatus } from "../lib/highlevel";
 import { useAuth } from "../auth/AuthContext";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
 // source of truth for which providers exist, how they authenticate, and how far
 // each implementation has gotten. This page renders what the API returns; only
-// presentation (icons, ordering) is decided here.
+// presentation (icons, names, copy, ordering) is decided here.
+//
+// Layout (the design's Settings → Integrations): rows in grouped panels — one
+// panel per category with a count, each row an icon, the name with its
+// connection type, a two-line description, a status and its actions, details
+// underneath. The member's own Outlook / OneDrive / Google Drive sit in their
+// categories as rows too, with their connected accounts under them.
 
 type Auth = "apikey" | "webhook" | "oauth" | "env";
 type Impl = "live" | "env" | "oauth";
@@ -27,7 +32,7 @@ interface ResendDomain { name: string; status: string }
 interface Provider {
   key: string; name: string; category: string; auth: Auth; implementation: Impl;
   description: string; secretLabel?: string; secretHint?: string; setupUrl?: string; syncable?: boolean;
-  /** Connected per member (Your connected accounts), not from the org catalog. */
+  /** Connected per member (a personal row), not once for the org. */
   personal?: boolean;
   status: "CONNECTED" | "NOT_CONNECTED" | "ERROR";
   configured: boolean;
@@ -40,62 +45,29 @@ interface Provider {
   connectedAt: string | null; lastSyncAt: string | null; lastError: string | null;
 }
 
-const CATEGORY_ICON: Record<string, LucideIcon> = {
-  "Email & Communication": Mail, "AI & Automation": Bot,
-  "Storage & Documents": HardDrive, "Productivity": Calendar,
-  "Authentication": ShieldCheck,
-};
-
 const AUTH_LABEL: Record<Auth, string> = { oauth: "OAuth 2.0", apikey: "API key", webhook: "Webhook", env: "Built-in" };
 
-// Official brand marks via Simple Icons (SVG, served from its CDN). Rendered on
-// a light tile so each brand's own color reads cleanly on the dark UI. Providers
-// without a brand slug fall back to a category glyph or initials; if a slug 404s
-// the <img> onError also falls back, so a blocked CDN degrades gracefully.
-const LOGO_SLUG: Record<string, string> = {
-  resend: "resend", claude: "claude", googledrive: "googledrive",
+// The design's short names, extra labels and two-line descriptions (the full
+// catalog text stays available on hover where it says more).
+const DISPLAY_NAME: Record<string, string> = { smtp: "SMTP fallback", storage: "Object storage (S3)", highlevel: "HighLevel" };
+const EXTRA_CHIPS: Record<string, { before?: string[]; after?: string[] }> = {
+  resend: { after: ["Primary email"] }, highlevel: { before: ["LeadConnector"] }, entra: { after: ["SSO"] },
 };
-// Brand-matched glyphs for providers without a usable Simple Icons mark (the
-// Microsoft family was removed from that set for trademark reasons).
-const LOGO_ICON: Record<string, LucideIcon> = {
-  smtp: Send, storage: HardDrive,
-  outlook: Mail, outlookcalendar: Calendar, onedrive: Cloud, entra: ShieldCheck,
-  teams: Users, highlevel: MessageSquare,
-};
-const BRAND_COLOR: Record<string, string> = {
-  outlook: "#0078D4", outlookcalendar: "#0078D4", onedrive: "#0078D4", entra: "#0078D4",
-  teams: "#6264A7", storage: "#569A31",
+const SHORT_DESC: Record<string, string> = {
+  resend: "Sends the app's email: portal notifications, reminders, invitations, password resets, and buyer outreach for anyone without Outlook connected.",
+  smtp: "Sends email through your own mail server, only when Resend isn't connected. Configured with SMTP_* variables on the API service.",
+  teams: "Posts deal and portal notifications (new leads, offers, buyer replies) to a Teams channel through a Power Automate workflow.",
+  claude: "Drafts outreach and summarizes deals. The key is checked against the Anthropic API when you connect.",
+  storage: "Stores deal and buyer attachments in S3-compatible storage (AWS S3, Cloudflare R2, Backblaze B2). Configured on the API service.",
+  outlookcalendar: "Mirrors deal deadlines (find buyer by, closing, extended closing) as events on your Outlook calendar and keeps them up to date.",
+  entra: "Single sign-on with Microsoft Entra ID (OpenID Connect). Configured with MICROSOFT_CLIENT_ID and related variables.",
 };
 
-function IntegrationLogo({ p }: { p: Provider }) {
-  const [failed, setFailed] = useState(false);
-  const slug = LOGO_SLUG[p.key];
-  const initials = p.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase();
-  if (slug && !failed) {
-    // Initials sit behind the brand mark so a blocked/offline CDN (corporate
-    // proxy, ad-blocker, outage) degrades to a readable badge instead of a
-    // blank tile — the image covers them once it loads.
-    return (
-      <span className="integration-logo brand" title={p.name}>
-        <span className="integration-logo-fallback" aria-hidden="true">{initials}</span>
-        <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={24} height={24} loading="lazy" onError={() => setFailed(true)} />
-      </span>
-    );
-  }
-  const Icon = LOGO_ICON[p.key];
-  const color = BRAND_COLOR[p.key];
-  return (
-    <span className="integration-logo" title={p.name} style={color ? { color } : undefined}>
-      {Icon ? <Icon size={20} /> : initials}
-    </span>
-  );
-}
-
-/** Verification chips for the Resend card — one per sending domain. */
+/** Verification chips for Resend — one per sending domain. */
 function DomainChips({ domains }: { domains: ResendDomain[] }) {
   if (!domains.length) return null;
   return (
-    <div className="integration-chips">
+    <div className="ig-perms">
       {domains.map((d) => (
         <Tag
           key={d.name}
@@ -109,8 +81,18 @@ function DomainChips({ domains }: { domains: ResendDomain[] }) {
   );
 }
 
+function orgStatus(p: Provider): { tone: RowTone; label: string; title?: string; connected: boolean } {
+  if (p.implementation === "env") return p.status === "CONNECTED"
+    ? { tone: "connected", label: "Connected", connected: true }
+    : { tone: "off", label: "Not configured", connected: false, title: "Set with environment variables on the API service." };
+  if (p.status === "CONNECTED") return { tone: "connected", label: "Connected", connected: true };
+  if (p.status === "ERROR") return { tone: "error", label: "Error", connected: false, title: p.lastError ?? "The last check failed — reconnect or re-validate." };
+  if (p.implementation === "oauth" && !p.configured) return { tone: "setup", label: "Setup required", connected: false, title: "Needs a one-time server-side setup (OAuth app registration) before it can be connected." };
+  return { tone: "off", label: "Not connected", connected: false };
+}
+
 export function Integrations() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   // Admins manage the organization's integrations; every member with the
   // matching permission manages their own Outlook / OneDrive / Google Drive.
   const isAdmin = can("manageApiIntegrations");
@@ -124,12 +106,14 @@ export function Integrations() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; message: string }>>({});
   const [filter, setFilter] = useState<"all" | "connected" | "setup">("all");
+  const onMessage = (m: string) => { setErr(null); setFlash(m); };
+  const onError = (m: string) => { setFlash(null); setErr(m); };
+  const accounts = usePersonalAccounts({ data: mine.data, onReload: mine.reload, onMessage, onError });
 
   function load() {
     if (!isAdmin) { setProviders([]); return; }
     api.get<Provider[]>("/integrations")
-      // Personal providers render in "Your connected accounts" instead.
-      .then((rows) => setProviders(rows.filter((p) => !p.personal)))
+      .then(setProviders)
       .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load integrations"));
   }
   useEffect(load, []);
@@ -170,14 +154,6 @@ export function Integrations() {
     } catch (e) { setErr(e instanceof ApiError ? e.message : "Could not start authorization"); setBusyKey(null); }
   }
 
-  const categories = useMemo(() => {
-    const m = new Map<string, Provider[]>();
-    for (const p of providers ?? []) { const arr = m.get(p.category) ?? []; arr.push(p); m.set(p.category, arr); }
-    return [...m.entries()];
-  }, [providers]);
-
-  const connectedCount = useMemo(() => (providers ?? []).filter((p) => p.status === "CONNECTED").length, [providers]);
-
   async function run(p: Provider, action: "test" | "sync") {
     setBusyKey(p.key); setErr(null);
     try {
@@ -195,66 +171,92 @@ export function Integrations() {
     finally { setBusyKey(null); setDisconnecting(null); }
   }
 
+  // Every row on the page, in the design's order: the org catalog (admins) with
+  // its personal providers swapped for the member's own rows; members without
+  // the admin view see just their personal rows.
+  type Item = { kind: "org"; p: Provider; category: string; connected: boolean } | { kind: "personal"; info: AccountProviderInfo; category: string; connected: boolean };
+  const items = useMemo<Item[]>(() => {
+    const infos = new Map((mine.data?.providers ?? []).map((i) => [i.key, i] as const));
+    const personal = (key: AccountProvider): Item | null => {
+      const info = infos.get(key);
+      if (!info) return null;
+      const accts = (mine.data?.accounts ?? []).filter((a) => a.provider === key && a.status !== "DISCONNECTED");
+      return { kind: "personal", info, category: PERSONAL_META[key].category, connected: personalStatus(info, accts).connected };
+    };
+    const out: Item[] = [];
+    if (isAdmin && providers) {
+      for (const p of providers) {
+        if (p.personal) { const it = personal(p.key as AccountProvider); if (it) out.push(it); }
+        else out.push({ kind: "org", p, category: p.category, connected: orgStatus(p).connected });
+      }
+    } else {
+      for (const key of ["outlook", "googledrive", "onedrive"] as AccountProvider[]) { const it = personal(key); if (it) out.push(it); }
+    }
+    return out;
+  }, [providers, mine.data, isAdmin]);
+
   if (!providers || (!mine.data && !mine.error)) return <SettingsLayout><Spinner label="Loading integrations…" /></SettingsLayout>;
 
-  // View filter (presentation only): counts are of the cards on this page.
-  const matches = (p: Provider) => filter === "all" || (filter === "connected" ? p.status === "CONNECTED" : p.status !== "CONNECTED");
-  const shown = categories.map(([category, items]) => [category, items.filter(matches)] as const).filter(([, items]) => items.length > 0);
+  const connectedCount = items.filter((i) => i.connected).length;
+  // View filter (presentation only): counts are of the rows on this page.
+  const shownItems = items.filter((i) => filter === "all" || (filter === "connected" ? i.connected : !i.connected));
+  const groups = CATEGORY_ORDER
+    .map((category) => [category, shownItems.filter((i) => i.category === category)] as const)
+    .concat([...new Set(shownItems.map((i) => i.category))].filter((c) => !CATEGORY_ORDER.includes(c)).map((c) => [c, shownItems.filter((i) => i.category === c)] as const))
+    .filter(([, list]) => list.length > 0);
+  const orgName = user?.organization?.name ?? "your organization";
 
   return (
     <SettingsLayout>
-      <div className="integ-head">
-        <div className="set-head-text">
+      <div className="ig-head">
+        <div className="ig-head-text">
           <h3 className="set-title">Integrations</h3>
           <p className="set-desc">
-            A focused set of integrations, each fully functional the moment it's connected. Credentials are validated live
-            when you connect and stored encrypted; they are never sent back to the browser.
+            Connect the services {orgName} uses for email, texting, documents and sign-in. Credentials are checked when you connect
+            and stored encrypted. They're never sent back to the browser.
           </p>
         </div>
-        {isAdmin && <Segmented
+        <Segmented
+          className="ig-filter"
           ariaLabel="Show integrations"
           value={filter}
           onChange={setFilter}
           options={[
-            { value: "all", label: "All", count: providers.length },
+            { value: "all", label: "All", count: items.length },
             { value: "connected", label: "Connected", count: connectedCount },
-            { value: "setup", label: "Needs setup", count: providers.length - connectedCount },
+            { value: "setup", label: "Needs setup", count: items.length - connectedCount },
           ]}
-        />}
+        />
       </div>
       {err && <Banner kind="error">{err}</Banner>}
       {mine.error && <Banner kind="error">{mine.error}</Banner>}
       {flash && <Banner kind="info">{flash}</Banner>}
 
-      {mine.data && <ConnectedAccountsSection data={mine.data} onReload={mine.reload} onMessage={(m) => { setErr(null); setFlash(m); }} onError={(m) => { setFlash(null); setErr(m); }} />}
-      {isAdmin && <TeamConnections onMessage={(m) => { setErr(null); setFlash(m); }} onError={(m) => { setFlash(null); setErr(m); }} />}
-
-      {isAdmin && shown.length === 0 && <div className="integ-none">Nothing here.</div>}
-      {shown.map(([category, items]) => {
-        const Icon = CATEGORY_ICON[category] ?? Bot;
-        return (
-          <div key={category} className="integ-group">
-            <span className="integ-group-label"><Icon size={14} aria-hidden="true" /> {category}</span>
-            <div className="integration-grid">
-              {items.map((p) => (
-                <IntegrationCard
-                  key={p.key}
-                  p={p}
-                  busy={busyKey === p.key}
-                  result={testResult[p.key]}
-                  onConnect={() => setConnecting(p)}
-                  onOAuth={() => startOAuth(p)}
-                  onDisconnect={() => setDisconnecting(p)}
-                  onConfigure={() => setConfiguring(p)}
-                  onTest={() => run(p, "test")}
-                  onSync={() => run(p, "sync")}
-                  onReload={load}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+      {groups.length === 0 && <div className="integ-none">Nothing here.</div>}
+      {groups.map(([category, list]) => (
+        <IntegrationGroup key={category} category={category} count={list.length}>
+          {list.map((it) => it.kind === "personal" ? (
+            <PersonalProviderRow key={it.info.key} info={it.info} isAdmin={isAdmin} ctl={accounts}
+              accounts={(mine.data?.accounts ?? []).filter((a) => a.provider === it.info.key && a.status !== "DISCONNECTED")} />
+          ) : (
+            <OrgRow
+              key={it.p.key}
+              p={it.p}
+              busy={busyKey === it.p.key}
+              result={testResult[it.p.key]}
+              onConnect={() => setConnecting(it.p)}
+              onOAuth={() => startOAuth(it.p)}
+              onDisconnect={() => setDisconnecting(it.p)}
+              onConfigure={() => setConfiguring(it.p)}
+              onTest={() => run(it.p, "test")}
+              onSync={() => run(it.p, "sync")}
+              onReload={load}
+            />
+          ))}
+        </IntegrationGroup>
+      ))}
+      {isAdmin && <TeamConnections onMessage={onMessage} onError={onError} />}
+      {accounts.dialogs}
 
       {connecting?.key === "highlevel" && (
         <HighLevelConnectModal
@@ -314,7 +316,10 @@ export function Integrations() {
   );
 }
 
-function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, onConfigure, onTest, onSync, onReload }: {
+const mi = (icon: ReactNode, text: string) => <span className="ig-mi">{icon} {text}</span>;
+
+/** One organization integration as a row (the design's list layout). */
+function OrgRow({ p, busy, result, onConnect, onOAuth, onDisconnect, onConfigure, onTest, onSync, onReload }: {
   p: Provider; busy: boolean; result?: { ok: boolean; message: string };
   onConnect: () => void; onOAuth: () => void; onDisconnect: () => void; onConfigure: () => void; onTest: () => void; onSync: () => void;
   onReload: () => void;
@@ -328,85 +333,105 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
   // An OAuth provider that isn't configured on the server can't be connected
   // yet — it needs an app registration + server credentials.
   const needsSetup = p.implementation === "oauth" && !p.configured;
-  return (
-    <div className={`integration-card ${connected ? "connected" : ""}`}>
-      <div className="integration-head">
-        <IntegrationLogo p={p} />
-        <div className="integration-id">
-          <div className="integration-name">{p.name}</div>
-          <div className="integration-chips">
-            <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
-            {p.key === "resend" && <span className="chip-mini" title="All app email routes through Resend when connected.">Primary email</span>}
-          </div>
-        </div>
-        <Tag
-          tone={connected ? "success" : errored ? "danger" : needsSetup ? "warn" : "neutral"}
-          dot
-          title={
-            connected ? "Connected and validated — data can flow."
-              : errored ? "Connected previously but the last check failed — reconnect or re-validate."
-              : needsSetup ? "Needs a one-time server-side setup (OAuth app registration or API config) before it can be connected."
-              : "Ready to connect — add a credential to start. Nothing is flowing yet."
-          }
-        >
-          {connected ? "Connected" : errored ? "Error" : needsSetup ? "Setup required" : "Not connected"}
-        </Tag>
-      </div>
-      <p className="integration-desc" title={p.description}>{p.description}</p>
+  const st = orgStatus(p);
+  const chips = [...(EXTRA_CHIPS[p.key]?.before ?? []), AUTH_LABEL[p.auth], ...(EXTRA_CHIPS[p.key]?.after ?? [])];
+  const replaceLabel = p.auth === "webhook" ? "Replace webhook URL" : p.key === "highlevel" ? "Replace key" : "Replace credentials";
 
+  let actions: ReactNode;
+  if (needsSetup) {
+    actions = p.setupUrl ? <a className="ig-btn" href={p.setupUrl} target="_blank" rel="noreferrer noopener">Set up</a> : null;
+  } else if (p.implementation === "env") {
+    actions = <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>;
+  } else if (isHL && (connected || errored)) {
+    actions = (
+      <>
+        {hlPhase === "preview" && (
+          <button className="small primary" disabled={hl.starting || errored} onClick={() => void hl.startImport()}>{hl.starting ? "Starting…" : "Start import"}</button>
+        )}
+        <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
+        {hlPhase === "live" && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
+        <OverflowMenu ariaLabel="More HighLevel actions" items={[
+          ...(hlPhase === "live" ? [{
+            label: mi(<Tags size={14} />, hl.status?.tagRefresh?.running ? "Re-reading tags…" : "Re-read tags now"),
+            onClick: () => { if (!hl.starting && !errored && !hl.status?.tagRefresh?.running) void hl.rereadTags(); },
+          }] : []),
+          { label: mi(<Settings2 size={14} />, "Configure"), onClick: onConfigure },
+          { label: mi(<KeyRound size={14} />, replaceLabel), onClick: onConnect },
+          { label: mi(<LogOut size={14} />, "Disconnect"), danger: true, onClick: onDisconnect },
+        ]} />
+      </>
+    );
+  } else if (connected || errored) {
+    actions = (
+      <>
+        <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
+        {p.syncable && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
+        <OverflowMenu ariaLabel={`More ${p.name} actions`} items={[
+          ...(p.implementation !== "oauth" ? [{ label: mi(<Settings2 size={14} />, "Configure"), onClick: onConfigure }] : []),
+          p.implementation === "oauth"
+            ? { label: mi(<RotateCcw size={14} />, "Reconnect"), onClick: onOAuth }
+            : { label: mi(<KeyRound size={14} />, replaceLabel), onClick: onConnect },
+          { label: mi(<LogOut size={14} />, "Disconnect"), danger: true, onClick: onDisconnect },
+        ]} />
+      </>
+    );
+  } else {
+    actions = (
+      <button className="small primary" disabled={busy} onClick={p.implementation === "oauth" ? onOAuth : onConnect}>
+        {busy ? "Starting…" : "Connect"}
+      </button>
+    );
+  }
+
+  const details = (
+    <>
       {p.key === "resend" && (connected || errored) && p.config.fromEmail && (
-        <p className="integration-meta">
-          Sender: <code>{p.config.fromName ? `${p.config.fromName} <${p.config.fromEmail}>` : p.config.fromEmail}</code>
-        </p>
+        <p className="ig-note">Sender: <code>{p.config.fromName ? `${p.config.fromName} <${p.config.fromEmail}>` : p.config.fromEmail}</code></p>
       )}
       {p.key === "resend" && (connected || errored) && <DomainChips domains={p.config.domains ?? []} />}
-      {connected && p.secretMask && <p className="integration-meta">Credential: <code>{p.secretMask}</code></p>}
-      {connected && p.lastSyncAt && !isHL && <p className="integration-meta">Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
-      {isHL && hl.status && (connected || errored) && <HighLevelSummary s={hl.status} />}
-      {isHL && hl.error && <p className="error-text integration-err">{hl.error}</p>}
-      {p.lastError && <p className="error-text integration-err">{p.lastError}</p>}
-      {result && <p className={`${result.ok ? "integration-meta" : "error-text integration-err"}`}>{result.message}</p>}
+      {connected && p.secretMask && !isHL && <p className="ig-note">Credential: <code>{p.secretMask}</code></p>}
+      {connected && p.lastSyncAt && !isHL && p.syncable && (
+        <p className="ig-note">Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>
+      )}
+      {isHL && hl.status && (connected || errored) && (hl.status.phase === "live"
+        ? <HighLevelFigures s={hl.status} secretMask={p.secretMask} connectedAt={p.connectedAt} />
+        : <HighLevelSummary s={hl.status} />)}
+      {isHL && hl.error && <p className="ig-err">{hl.error}</p>}
+      {p.lastError && <p className="ig-err">{p.lastError}</p>}
+      {result && <p className={result.ok ? "ig-note" : "ig-err"}>{result.message}</p>}
+    </>
+  );
+  const hasDetails = (p.key === "resend" && (connected || errored)) || (connected && (p.secretMask || (p.lastSyncAt && p.syncable)))
+    || (isHL && (hl.status || hl.error)) || p.lastError || result;
 
-      <div className="integration-actions">
-        {needsSetup ? (
-          p.setupUrl && <a className="integration-link-btn" href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
-        ) : p.implementation === "env" ? (
-          <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>
-        ) : isHL && (connected || errored) ? (
-          <>
-            {hlPhase === "preview" && (
-              <button className="small primary" disabled={hl.starting || errored} onClick={() => void hl.startImport()}>
-                {hl.starting ? "Starting…" : "Start import"}
-              </button>
-            )}
-            <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
-            {hlPhase === "live" && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
-            {hlPhase === "live" && (
-              <button className="small" disabled={hl.starting || errored || !!hl.status?.tagRefresh?.running} onClick={() => void hl.rereadTags()}
-                title="Look every texted contact up in HighLevel again and re-sort them for the Minerals filter — use after adding or renaming tags in HighLevel.">
-                {hl.status?.tagRefresh?.running ? "Re-reading tags…" : hl.starting ? "Starting…" : "Re-read tags now"}
-              </button>
-            )}
-            <button className="small" onClick={onConfigure}>Configure</button>
-            <button className="small" onClick={onConnect}>Replace key</button>
-            <button className="small set-btn-danger-text" onClick={onDisconnect}>Disconnect</button>
-          </>
-        ) : connected || errored ? (
-          <>
-            <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
-            {p.syncable && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
-            {p.implementation !== "oauth" && <button className="small" onClick={onConfigure}>Configure</button>}
-            <button className="small" onClick={p.implementation === "oauth" ? onOAuth : onConnect}>
-              {p.implementation === "oauth" ? "Reconnect" : "Replace key"}
-            </button>
-            <button className="small set-btn-danger-text" onClick={onDisconnect}>Disconnect</button>
-          </>
-        ) : (
-          <button className="small primary" disabled={busy} onClick={p.implementation === "oauth" ? onOAuth : onConnect}>
-            {busy ? "Starting…" : p.implementation === "oauth" ? "Connect with OAuth" : "Connect"}
-          </button>
-        )}
+  return (
+    <IntegrationRow iconKey={p.key} name={DISPLAY_NAME[p.key] ?? p.name} chips={chips} description={SHORT_DESC[p.key] ?? p.description}
+      tone={st.tone} statusLabel={st.label} statusTitle={st.title} actions={actions}>
+      {hasDetails ? details : null}
+    </IntegrationRow>
+  );
+}
+
+/** HighLevel, live: the four figures, then the credential / location / connected line. */
+function HighLevelFigures({ s, secretMask, connectedAt }: { s: HighLevelStatus; secretMask: string | null; connectedAt: string | null }) {
+  const n = (v: number) => v.toLocaleString("en-US");
+  const checked = s.lastSyncAt ? new Date(s.lastSyncAt) : null;
+  const tagged = s.crmTags?.tagged ?? 0;
+  return (
+    <div className="ig-figs">
+      <div className="ig-figs-grid">
+        <div className="ig-fig"><span className="ig-fig-k">Texts synced</span><b className="ig-fig-v">{n(s.imported)}</b><span className="ig-fig-s">from {n(s.contacts)} contact{s.contacts === 1 ? "" : "s"}</span></div>
+        <div className="ig-fig"><span className="ig-fig-k">Tagged contacts</span><b className="ig-fig-v">{n(tagged)}</b><span className="ig-fig-s">SMS &amp; Acquisition tags</span></div>
+        <div className="ig-fig"><span className="ig-fig-k">Last checked</span><b className="ig-fig-v">{checked ? checked.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—"}</b><span className="ig-fig-s">{checked ? `${checked.toLocaleDateString([], { month: "short", day: "numeric" })} · ${HL_SYNC_EVERY}` : HL_SYNC_EVERY}</span></div>
+        <div className="ig-fig"><span className="ig-fig-k">Status</span><b className={`ig-fig-v ${s.status === "ERROR" ? "warn" : "ok"}`}>{s.status === "ERROR" ? "Needs attention" : "Up to date"}</b><span className="ig-fig-s">Feeds Reports → SMS performance</span></div>
       </div>
+      <div className="ig-figs-foot">
+        {secretMask && <span>Credential <code>{secretMask}</code></span>}
+        {s.locationName && <span>Location <code>{s.locationName}</code></span>}
+        {connectedAt && <span>Connected <code>{fmtDate(connectedAt)}</code></span>}
+      </div>
+      {/* Tag re-read progress, CRM tag writes, last run, missing permissions — as before. */}
+      <HighLevelSummary s={{ ...s, locationName: null }} extrasOnly />
     </div>
   );
 }

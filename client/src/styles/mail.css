@@ -157,7 +157,3 @@ button.mc-att:hover { border-color: var(--line-hover); background: var(--hover);
 .sig-meta { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-top: 12px; }
 .sig-meta .field { margin: 0; flex: 1 1 220px; }
 .sig-check { display: inline-flex; align-items: center; gap: 6px; height: 38px; font-size: 13px; color: var(--ink-1); }
-
-/* Settings: Outlook account switch */
-.ca-toggle { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
-.ca-toggle input { margin-top: 1px; }

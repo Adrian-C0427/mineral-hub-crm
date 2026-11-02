@@ -332,57 +332,128 @@ input.mono-input { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, 
 .portal-link-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .portal-link-text { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 
-/* --- Integrations --- */
-.integ-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.integ-head .set-head-text { flex: 1 1 260px; }
-.integ-group { display: flex; flex-direction: column; gap: 10px; }
-.integ-group-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
-.settings-content .integration-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.settings-content .integration-card {
-  padding: 16px; gap: 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface);
+/* --- Integrations ---
+   The design's list: rows in grouped panels (components/IntegrationRow.tsx).
+   Each row: icon, name + connection-type chips, a two-line description, then
+   the status dot and actions on the right; details (accounts, HighLevel
+   figures, messages) sit under the text column. */
+.ig-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.ig-head-text { flex: 1 1 320px; max-width: 520px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ig-filter.seg { flex: none; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--input); }
+.ig-filter .seg-item { height: 28px; padding: 0 10px; color: var(--ink-3); }
+.ig-filter .seg-item.active { color: var(--ink); }
+.ig-filter .seg-count {
+  min-width: 20px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-xs); background: var(--hover-strong); font-size: 11px; font-variant-numeric: tabular-nums;
 }
-.settings-content .integration-card.connected { border-color: var(--success-border); }
-.settings-content .integration-head { align-items: flex-start; gap: 12px; margin-bottom: 0; }
-.settings-content .integration-logo { border-radius: var(--radius-chip); }
-.integration-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.settings-content .integration-name { font-size: 14px; font-weight: 600; color: var(--ink); }
-.integration-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.settings-content .chip-mini {
-  height: 20px; padding: 0 7px; display: inline-flex; align-items: center;
-  border: 0; border-radius: 5px; background: var(--hover); color: var(--ink-2); font-size: 11.5px; font-weight: 600;
+.ig-group { display: flex; flex-direction: column; gap: 10px; }
+.ig-group-label {
+  margin: 0; display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
 }
-.settings-content .integration-desc { flex: none; margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.ig-group-label svg { color: var(--ink-4); }
+.ig-group-count { font-weight: 400; letter-spacing: 0; color: var(--ink-4); }
+.ig-panel { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+.ig-panel-note { margin: 0; padding: 12px 18px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
+
+.ig-row + .ig-row, .ig-panel-note + .ig-team-row, .ig-team-row + .ig-team-row { border-top: 1px solid var(--line); }
+.ig-row-main { display: flex; align-items: center; gap: 14px; padding: 14px 18px; }
+.ig-icon {
+  flex: none; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface-2); color: var(--ink-2);
+}
+.ig-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ig-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--ink); }
+.ig-chip {
+  height: 19px; padding: 0 6px; display: inline-flex; align-items: center;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--ink-2); font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.ig-desc {
+  margin: 0; max-width: 560px; font-size: 13px; line-height: 1.5; color: var(--ink-3);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ig-side { flex: none; display: flex; align-items: center; gap: 16px; margin-left: auto; }
+.ig-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-3); white-space: nowrap; }
+.ig-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); }
+.ig-status.connected { color: var(--success-ink); }
+.ig-status.connected i { background: var(--success); }
+.ig-status.setup { color: var(--warn-ink); }
+.ig-status.setup i { background: var(--warn); }
+.ig-status.error { color: var(--danger-ink); }
+.ig-status.error i { background: var(--danger); }
+.ig-actions { display: flex; align-items: center; gap: 6px; }
+.ig-actions button { min-height: 30px; height: 30px; padding: 0 12px; font-size: 12.5px; font-weight: 500; }
+.ig-actions .ovf-btn {
+  width: 30px; min-width: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink-2);
+}
+.ig-actions .ovf-btn:hover { background: var(--hover); border-color: var(--line-hover); color: var(--ink); }
+.ig-btn {
+  height: 30px; padding: 0 12px; display: inline-flex; align-items: center;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); font-size: 12.5px; font-weight: 500; text-decoration: none;
+}
+.ig-btn:hover { background: var(--hover); border-color: var(--line-hover); color: var(--ink); text-decoration: none; }
+.ig-mi { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Details sit under the text column (18px gutter + 36px icon + 14px gap). */
+.ig-details { display: flex; flex-direction: column; gap: 10px; padding: 0 18px 16px 68px; }
+.ig-note { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.ig-note code, .ig-figs-foot code { font-family: var(--set-mono); font-size: 12px; color: var(--ink-2); }
+.ig-err { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--danger-ink); }
+.ig-perms { display: flex; flex-wrap: wrap; gap: 4px; }
+.hl-summary:empty { display: none; }
+
+/* A member's connected account (Outlook / OneDrive / Google Drive). */
+.ig-acct { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.ig-acct-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.ig-acct-id { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.ig-acct-id b { font-weight: 600; }
+.ig-acct-id span { font-size: 12px; color: var(--ink-3); }
+.ig-acct-sync { font-size: 12px; color: var(--ink-4); white-space: nowrap; }
+.ig-acct-sync b { font-weight: 500; color: var(--ink-2); }
+.ig-acct .ig-actions button { min-height: 28px; height: 28px; padding: 0 10px; font-size: 12px; }
+.ig-toggle { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 1.45; color: var(--ink-2); cursor: pointer; }
+.ig-toggle input { margin: 1px 0 0; }
+
+/* Team connections (admins): who connected what. */
+.ig-team-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 18px; font-size: 12.5px; }
+.ig-team-acct { flex: 1 1 200px; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.ig-team-row button { min-height: 28px; height: 28px; padding: 0 10px; font-size: 12px; }
+
+/* HighLevel, live: four figures, then credential · location · connected. */
+.ig-figs { display: flex; flex-direction: column; gap: 10px; }
+.ig-figs-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; }
+.ig-fig { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; }
+.ig-fig + .ig-fig { border-left: 1px solid var(--line); }
+.ig-fig-k { font-size: 11px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-4); }
+.ig-fig-v { font-size: 18px; font-weight: 600; line-height: 1.3; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ig-fig-v.ok { color: var(--success-ink); }
+.ig-fig-v.warn { color: var(--warn-ink); }
+.ig-fig-s { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ig-figs-foot {
+  display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: -10px; padding: 9px 14px;
+  border: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); font-size: 12px; color: var(--ink-4);
+}
+.ig-figs-foot code { margin-left: 6px; }
+.ig-figs-foot:empty { display: none; }
+.ig-figs-grid:has(+ .ig-figs-foot:empty) { border-bottom: 1px solid var(--line); border-radius: var(--radius); }
+@media (max-width: 1100px) {
+  /* The menu scrolls with the page here, so it can't cover the rows. */
+  .settings-rail { position: static; }
+  .ig-figs-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ig-fig:nth-child(odd) { border-left: 0; }
+  .ig-fig:nth-child(n + 3) { border-top: 1px solid var(--line); }
+}
 .integration-meta { margin: 0; font-size: 12px; color: var(--ink-4); }
 .integration-meta code { color: var(--ink-2); }
 .settings-content .integration-err { margin: 0; font-size: 12px; }
-.integration-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
-.integration-actions button { min-height: 32px; padding: 0 12px; font-size: 12.5px; font-weight: 600; }
 .integration-link-btn {
   height: 32px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--ink); font-size: 12.5px; font-weight: 600; text-decoration: none;
 }
 .integration-link-btn:hover { border-color: var(--line-hover-strong); color: var(--ink); text-decoration: none; }
 .integ-none { padding: 40px; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); text-align: center; font-size: 13px; color: var(--ink-4); }
-/* Your connected accounts (components/ConnectedAccounts.tsx): one row per account inside its provider card. */
-.integ-group-desc { margin: -4px 0 2px; max-width: 760px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
-.ca-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.ca-row { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
-.ca-row-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.ca-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ca-email { font-size: 13px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
-.ca-name { font-size: 12px; color: var(--ink-3); }
-.ca-meta { font-size: 12px; color: var(--ink-3); }
-.ca-meta strong { font-weight: 600; color: var(--ink-2); }
-.ca-perms { display: flex; flex-wrap: wrap; gap: 4px; }
-.ca-row .integration-actions { margin-top: 2px; }
-.ca-row .integration-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; height: 28px; }
-.ca-team { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
-.ca-team-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
-.ca-team-row:first-child { border-top: 0; }
-.ca-team-acct { flex: 1 1 200px; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
-.ca-team-sync { color: var(--ink-4); }
-.ca-team-row button { min-height: 28px; height: 28px; padding: 0 10px; font-size: 12px; }
-/* HighLevel card: sync phase lines; connect modal: setup steps + scope list. */
+
 .hl-summary { display: flex; flex-direction: column; gap: 6px; }
 .hl-line { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .hl-steps { margin: 0 0 14px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
@@ -484,7 +555,20 @@ input.mono-input { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, 
   .portal-url-open { height: 40px; }
   .portal-actions button { width: 100%; }
   .integration-link-btn { height: 40px; }
-  .settings-content .integration-grid { grid-template-columns: minmax(0, 1fr); }
+
+  /* Integrations: icon + text, then the status and actions on their own line. */
+  .ig-head { align-items: stretch; }
+  .ig-filter.seg { align-self: flex-start; max-width: 100%; }
+  .ig-filter .seg-item { height: 34px; }
+  .ig-row-main { flex-wrap: wrap; align-items: flex-start; gap: 10px 12px; padding: 14px; }
+  .ig-text { flex: 1 1 calc(100% - 48px); }
+  .ig-desc { -webkit-line-clamp: 3; }
+  .ig-side { flex: 1 1 100%; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; margin-left: 0; }
+  .ig-actions { flex-wrap: wrap; }
+  .ig-actions button, .ig-acct .ig-actions button, .ig-btn, .ig-team-row button { min-height: 40px; height: 40px; }
+  .ig-actions .ovf-btn { width: 40px; min-width: 40px; }
+  .ig-details { padding: 0 14px 14px; }
+  .ig-panel-note, .ig-team-row { padding-left: 14px; padding-right: 14px; }
 
   .set-savebar { bottom: calc(12px + var(--bottom-clear, 0px)); flex-wrap: wrap; padding: 12px; }
   .set-savebar-text { flex: 1 1 100%; }

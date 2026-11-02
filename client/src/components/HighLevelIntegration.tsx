@@ -69,13 +69,21 @@ export function useHighLevelStatus(enabled: boolean, refreshKey: string, onSettl
   return { status, error, starting, startImport, rereadTags, refresh };
 }
 
-/** The HighLevel card's middle section: preview, import progress, or "up to date". */
-export function HighLevelSummary({ s }: { s: HighLevelStatus }) {
+/**
+ * The HighLevel card's middle section: preview, import progress, or "up to date".
+ * `extrasOnly` (live, under the figures grid that already shows the totals and
+ * status) keeps just the tag re-read, CRM tag, last-run and permission lines.
+ */
+export function HighLevelSummary({ s, extrasOnly = false }: { s: HighLevelStatus; extrasOnly?: boolean }) {
   // In ERROR the card already shows lastError; don't repeat the failed run.
   const run = s.status === "ERROR" && s.lastRun && !s.lastRun.ok ? null : lastRunText(s.lastRun, s.phase);
   const missing = missingScopesText(s.missingScopes);
   const retag = s.phase === "live" ? tagRefreshText(s.tagRefresh, fmtDateTime) : null;
   const crm = s.phase === "live" ? crmTagsText(s.crmTags) : null;
+  // The figures grid already shows the tagged count, so under it only a tag
+  // write in progress or a problem needs its own line.
+  const crmBusy = !!s.crmTags && (s.crmTags.removing || (s.crmTags.working && s.crmTags.pending > 0));
+  const showCrm = !!crm && (!extrasOnly || crm.warn || crmBusy);
   return (
     <div className="hl-summary">
       {s.locationName && <p className="integration-meta">Location: <code>{s.locationName}</code></p>}
@@ -91,14 +99,14 @@ export function HighLevelSummary({ s }: { s: HighLevelStatus }) {
       )}
       {s.phase === "live" && (
         <>
-          <p className="hl-line">
+          {!extrasOnly && <p className="hl-line">
             <Tag tone={s.status === "ERROR" ? "warn" : "success"} dot>{s.status === "ERROR" ? "Needs attention" : "Up to date"}</Tag>
             <span>{s.status === "ERROR" ? "last good check" : "checked"} {fmtDateTime(s.lastSyncAt)}</span>
-          </p>
-          <p className="integration-meta">{totalsText(s)} · checked automatically {HL_SYNC_EVERY}.</p>
+          </p>}
+          {!extrasOnly && <p className="integration-meta">{totalsText(s)} · checked automatically {HL_SYNC_EVERY}.</p>}
           {retag && <p className={s.tagRefresh?.running ? "hl-line" : "integration-meta"}>{retag}</p>}
           {s.tagRefresh?.running && <ProgressBar value={importProgress(s.tagRefresh.done, s.tagRefresh.total)} />}
-          {crm && <p className={crm.warn ? "hl-warn" : "integration-meta"}>{crm.text}</p>}
+          {showCrm && crm && <p className={crm.warn ? "hl-warn" : "integration-meta"}>{crm.text}</p>}
         </>
       )}
       {run && s.phase !== "preview" && <p className={s.lastRun?.ok ? "integration-meta" : "error-text integration-err"}>{run}</p>}

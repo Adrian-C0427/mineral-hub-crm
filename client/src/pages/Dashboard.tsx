@@ -1027,14 +1027,15 @@ export function Dashboard() {
 // ---------------------------------------------------------------------------
 // Tasks widget — every outstanding contact task that needs attention (overdue,
 // due today, or due within the next week). Checking a task completes it in the
-// database and removes it from the widget instantly; clicking the row opens
-// the task (a contact task opens on the contact's workspace, where it can be
-// edited; a standalone one in the task modal here).
+// database; it stays in the list crossed out (at the bottom) so a mis-click
+// can be undone by unchecking it, and is gone on the next refresh. Clicking the
+// row opens the task (a contact task opens on the contact's workspace, where
+// it can be edited; a standalone one in the task modal here).
 // ---------------------------------------------------------------------------
 
 /**
- * Whose tasks the widget lists: "me" (default — My Tasks), "all" users, or one
- * user's id. The list refetches as soon as the selection changes. Tasks can be
+ * Whose tasks the widget lists: Mine (default) or All — and, under All, one
+ * teammate. The list refetches as soon as the selection changes. Tasks can be
  * created here (for yourself or a teammate) and completed in place.
  */
 function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
@@ -1063,44 +1064,51 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
     document.addEventListener("visibilitychange", onVisible);
     return () => { live = false; document.removeEventListener("visibilitychange", onVisible); };
   }, [whose, refreshKey]);
-  const whoseOptions = [
-    { value: "me", label: "My Tasks" },
-    { value: "all", label: "All Users" },
-    ...userOptions(users.filter((u) => u.id !== user?.id)),
-  ];
-  const showOwner = whose !== "me";
+  const teammates = users.filter((u) => u.id !== user?.id);
+  const scope: "me" | "all" = whose === "me" ? "me" : "all";
+  // Under All, an optional narrowing to one teammate (kept from the old filter).
+  const personOptions = [{ value: "all", label: "Everyone" }, ...userOptions(teammates)];
   // Due dates are calendar days stored at UTC midnight — compare day keys, not
   // timestamps, so a task due today never shows as overdue mid-morning.
   const todayKey = new Date().toISOString().slice(0, 10);
 
-  const complete = async (t: DashTask) => {
+  const setDone = async (t: DashTask, done: boolean) => {
     if (busy) return;
     setBusy(t.id);
     try {
-      await api.patch(`/tasks/${t.id}`, { completed: true });
-      setTasks((prev) => prev.filter((x) => x.id !== t.id));
+      await api.patch(`/tasks/${t.id}`, { completed: done });
+      setTasks((prev) => prev.map((x) => (x.id === t.id ? { ...x, completedAt: done ? new Date().toISOString() : null } : x)));
     } catch (e) {
-      showToast(e instanceof ApiError ? e.message : "Could not complete the task", "error");
+      showToast(e instanceof ApiError ? e.message : done ? "Could not complete the task" : "Could not reopen the task", "error");
     } finally { setBusy(null); }
   };
+  // Open tasks first (as the server ordered them), ticked ones crossed out below.
+  const ordered = [...tasks.filter((t) => !t.completedAt), ...tasks.filter((t) => t.completedAt)];
+  // "Due" = due today or overdue (what needs doing now), not everything listed.
+  const dueNow = tasks.filter((t) => !t.completedAt && t.dueDate && t.dueDate.slice(0, 10) <= todayKey).length;
 
   return (
     <div className="panel dash-card dash-tasks">
       <div className="dash-card-head dash-tasks-head">
         <div className="dash-card-titles">
           <h3 className="dash-card-title">Tasks</h3>
-          {tasks.length > 0 && <Tag tone="warn">{tasks.length} due</Tag>}
+          {dueNow > 0 && <Tag tone="warn">{dueNow} due</Tag>}
         </div>
         <div className="dash-tasks-tools">
-          <span className="dash-task-filter">
-            <Select value={whose} onChange={(v) => setWhose(v || "me")} options={whoseOptions} searchable={whoseOptions.length > 8}
-              width={116} ariaLabel="Show tasks for" />
-          </span>
+          <Segmented className="dash-task-scope" ariaLabel="Show tasks for" value={scope}
+            onChange={(v) => setWhose(v)} options={[{ value: "me", label: "Mine" }, { value: "all", label: "All" }]} />
           <button type="button" className="dash-task-add" onClick={() => setCreating(true)} title="Create a task for yourself or a teammate" aria-label="New task">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
       </div>
+      {scope === "all" && teammates.length > 0 && (
+        <div className="dash-task-person">
+          <span>Showing</span>
+          <Select value={whose === "me" ? "all" : whose} onChange={(v) => setWhose(v || "all")} options={personOptions}
+            searchable={personOptions.length > 8} width={150} ariaLabel="Show one teammate's tasks" />
+        </div>
+      )}
       {tasks.length === 0 ? (
         <div className="dash-empty-row">
           <span className="dash-empty-icon"><CheckIcon /></span>
@@ -1109,12 +1117,15 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
             {!loading && <span>{whose === "me" ? "You have no overdue or upcoming tasks" : whose === "all" ? "No overdue or upcoming tasks for anyone" : "No overdue or upcoming tasks for this user"}</span>}
           </span>
         </div>
-      ) : tasks.map((t) => {
+      ) : ordered.map((t) => {
         const dayKey = t.dueDate ? t.dueDate.slice(0, 10) : null;
-        const overdue = dayKey != null && dayKey < todayKey;
-        const dueToday = dayKey === todayKey;
+        const done = !!t.completedAt;
+        const overdue = !done && dayKey != null && dayKey < todayKey;
+        const dueToday = !done && dayKey === todayKey;
         const pr = TASK_PRIORITY_META[t.priority] ?? TASK_PRIORITY_META.MEDIUM;
-        const who = showOwner && t.assignedTo ? <UserAvatar user={t.assignedTo} size={14} withName className="inline" /> : null;
+        // Whose task it is, always: "You" for your own (the design's owner line).
+        const owner = t.assignedTo ?? t.createdBy ?? null;
+        const who = owner ? (owner.id === user?.id ? "You" : owner.name) : null;
         const body = (
           <>
             <span className="dash-task-title">{t.title}</span>
@@ -1123,10 +1134,10 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
           </>
         );
         return (
-          <div className="dash-trow" key={t.id}>
+          <div className={`dash-trow ${done ? "done" : ""}`} key={t.id}>
             {t.canComplete ? (
-              <input type="checkbox" className="dash-tcheck" checked={false} disabled={busy === t.id} onChange={() => void complete(t)}
-                title="Mark complete" aria-label={`Complete task: ${t.title}`} />
+              <input type="checkbox" className="dash-tcheck" checked={done} disabled={busy === t.id} onChange={() => void setDone(t, !done)}
+                title={done ? "Mark as not done" : "Mark complete"} aria-label={`${done ? "Reopen" : "Complete"} task: ${t.title}`} />
             ) : <span className="dash-tcheck-ph" aria-hidden="true" />}
             {t.contactId ? (
               <Link to={`/contacts/${t.contactId}?task=${t.id}`} className="dash-tmain" title="Open this task on the contact's workspace">{body}</Link>
@@ -1136,7 +1147,7 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
             <span className="dash-tside">
               <Tag tone={pr.tone}>{pr.label}</Tag>
               <span className={`dash-task-due ${overdue ? "overdue" : dueToday ? "today" : ""}`}>
-                {dayKey == null ? "—" : overdue ? `Overdue · ${fmtDate(t.dueDate!)}` : dueToday ? "Due today" : `Due ${fmtDate(t.dueDate!)}`}
+                {done ? "Done" : dayKey == null ? "—" : overdue ? `Overdue · ${fmtDate(t.dueDate!)}` : dueToday ? "Due today" : `Due ${fmtDate(t.dueDate!)}`}
               </span>
             </span>
           </div>
