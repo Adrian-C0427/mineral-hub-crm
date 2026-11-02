@@ -35,6 +35,8 @@ import {
   isOAuthProvider, oauthConfigured, buildAuthorizeUrl, signState, verifyState,
   exchangeCode, persistBundle,
 } from "../services/integrationOAuth.js";
+import { verifyAccountState } from "../services/connected/oauth.js";
+import { isAccountProvider } from "../services/connected/providers.js";
 import { RESPONSE_WINDOW_OPTIONS } from "../domain/smsMetrics.js";
 import {
   HIGHLEVEL, highLevelStatus, validateHighLevelConnection, needsReconnect, startTagRefresh,
@@ -612,6 +614,10 @@ integrationsRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const def = requireDef(req.params.provider);
     if (def.implementation !== "oauth") throw new HttpError(400, `${def.name} does not use OAuth.`);
+    // Outlook, OneDrive and Google Drive connect per member now (routes/accounts.ts).
+    if (isAccountProvider(def.key)) {
+      throw new HttpError(400, `${def.name} now connects per person — use Connect on its card to connect your own account.`);
+    }
     if (!oauthConfigured(def.key)) {
       throw new HttpError(400, `${def.name} isn't configured on the server yet (its OAuth client id/secret are unset).`);
     }
@@ -740,16 +746,26 @@ integrationsOAuthCallbackRouter.get(
     }
     if (!code || !stateToken) return back({ error: "Missing authorization code or state.", provider });
 
+    // Two flows share this callback: an org-level integration (admin) and a
+    // member's own connected account (routes/accounts.ts) — told apart by the
+    // state token's audience, and finished by different authed routes.
     let state: { provider: string };
+    let flow: "org" | "account" = "org";
     try {
       state = verifyState(stateToken);
     } catch {
-      return back({ error: "Authorization link expired or was tampered with. Try again.", provider });
+      try {
+        state = verifyAccountState(stateToken);
+        flow = "account";
+      } catch {
+        return back({ error: "Authorization link expired or was tampered with. Try again.", provider });
+      }
     }
-    if (state.provider !== provider || !isOAuthProvider(provider)) {
+    const known = flow === "account" ? isAccountProvider(provider) : isOAuthProvider(provider);
+    if (state.provider !== provider || !known) {
       return back({ error: "Provider mismatch in authorization callback.", provider });
     }
-    const frag = new URLSearchParams({ oauth: provider, code, state: stateToken }).toString();
+    const frag = new URLSearchParams({ oauth: provider, code, state: stateToken, ...(flow === "account" ? { flow } : {}) }).toString();
     return res.redirect(`${env.APP_URL}/settings/integrations#${frag}`);
   }),
 );

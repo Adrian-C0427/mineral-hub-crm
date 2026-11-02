@@ -34,6 +34,7 @@ import { royaltyLabel , royaltyValue } from "../lib/royalty";
 import { perAcreRates } from "../lib/perAcre";
 import { impliedMargin } from "../lib/metrics";
 import { OperatorSelect } from "../components/OperatorSelect";
+import { RecordEmails } from "../components/mail/RecordEmails";
 import {
   addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, priceGroupFromStored, PriceNote, RoyaltyRateField, royaltyRateError, syncPriceGroup,
   type AcreageState, type PriceField, type PriceGroup,
@@ -432,6 +433,8 @@ export function DealDetail() {
           </>
         )}
       </CollapsibleSection>
+      {/* Emails with this deal's buyers (sent from the CRM or filed from Outlook). */}
+      <RecordEmails record={{ type: "deal", id: deal.id }} name={deal.name} />
       </div>
 
       {/* Documents */}

@@ -24,6 +24,7 @@ import { acres, fmtDate, fmtDateLocal, fmtDateTime, personName, toInputDate } fr
 import { formatPhone } from "../lib/phone";
 import type { ContactActivityRow } from "./ContactDetail";
 import type { Opp, OppActivityRow, UserLite, UserRef } from "../types";
+import { RecordEmails } from "../components/mail/RecordEmails";
 // MapLibre is heavy; only load it when the Location card is shown.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
@@ -224,6 +225,7 @@ export function OpportunityRecord({ opp, onChange: setOpp, reload: load }: { opp
           )}
         </Card>
       </div>
+      <RecordEmails record={{ type: "opportunity", id: opp.id }} name={opp.name} defaultTo={opp.email ? [{ name: null, address: opp.email }] : []} />
       </div>
 
       <div hidden={tab !== "tasks"}>

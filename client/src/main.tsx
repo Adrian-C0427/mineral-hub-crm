@@ -28,6 +28,8 @@ import "./styles/mobile-shell.css";
 import "./styles/followups.css";
 import "./styles/calendar.css";
 import "./styles/opportunities.css";
+import "./styles/cloud.css";
+import "./styles/mail.css";
 import "./styles/contact-mobile.css";
 
 // Front-end error monitoring — inert until VITE_SENTRY_DSN is set at build time.

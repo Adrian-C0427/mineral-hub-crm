@@ -10,6 +10,7 @@ import {
 } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
 import { invalidateRoleCache } from "../services/rolePermCache.js";
+import { disconnectMemberAccounts } from "../services/connected/accounts.js";
 import {
   ASSIGNABLE_ROLES, ALL_ROLES, DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_META,
   OWNER_ONLY_ACTIONS, OVERRIDE_LITERAL_MARKER, resolvePermissions, type OrgRole,
@@ -423,6 +424,8 @@ orgRouter.delete(
       const invitesRevoked = await revokeInvitesKnownTo(orgId(req), member, tx);
       return { teamId: await rotateTeamId(orgId(req), tx), invitesRevoked };
     });
+    // Their own mailbox / drive connections must not outlive the membership.
+    await disconnectMemberAccounts(orgId(req), member.id, req.user!.id);
     res.json({ ok: true, teamId: canSeeTeamId(req) ? teamId : null, invitesRevoked });
   }),
 );

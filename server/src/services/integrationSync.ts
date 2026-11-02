@@ -88,7 +88,14 @@ export async function syncIntegration(row: Integration, actorUserId?: string | n
   }
   let result = await checkIntegration(row);
   // Data pulls layered on the health check — each provider's real work:
-  if (result.ok && isInboundEmailProvider(row.provider)) {
+  // The old company-wide Outlook connection hands over to members' own
+  // mailboxes (services/mail/mailSync.ts) as soon as one is connected — both
+  // importing the same replies would log them twice.
+  const handedOver = isInboundEmailProvider(row.provider)
+    && (await prisma.connectedAccount.count({ where: { organizationId: row.organizationId, provider: "outlook", status: "CONNECTED" } })) > 0;
+  if (result.ok && handedOver) {
+    result = { ok: true, message: `${result.message} Buyer replies now sync through team members' own Outlook connections.` };
+  } else if (result.ok && isInboundEmailProvider(row.provider)) {
     // Connected mailboxes import inbound buyer replies (EMAIL_IN + notification).
     try {
       const r = await syncInboundEmail(row);

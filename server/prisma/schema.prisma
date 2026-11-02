@@ -199,6 +199,8 @@ model Organization {
   contacts               Contact[]
   contactLists           ContactList[]
   integrations           Integration[]
+  connectedAccounts      ConnectedAccount[]
+  emailMessages          EmailMessage[]
   researchDocuments      ResearchDocument[]
   researchPermits        ResearchPermit[]
   researchIngests        ResearchIngestRun[]
@@ -594,6 +596,9 @@ model User {
   contactActivities         ContactActivity[]    @relation("ContactActivityAuthor")
   assignedContactActivities ContactActivity[]    @relation("ContactActivityAssignee")
   oauthAccounts             OAuthAccount[]
+  connectedAccounts         ConnectedAccount[]   @relation("ConnectedAccounts")
+  sentEmails                EmailMessage[]       @relation("SentEmails")
+  cloudLinksCreated         CloudFileLink[]      @relation("CloudLinksCreated")
 
   ownedDeals             Deal[]                  @relation("DealRelationshipOwner")
   buyerOwnerships        BuyerOwner[]
@@ -805,10 +810,10 @@ model Deal {
 
   // Custom document-folder list for this deal/asset (rename/delete/reorder in
   // the Documents section). Empty = the module's default folder set.
-  docFolders String[] @default([])
+  docFolders        String[] @default([])
   // Default-folder set version this deal's stored list has been brought up to
   // (services/docFoldersBackfill.ts): 1 = the Lease folder was added.
-  docFoldersVersion Int @default(0)
+  docFoldersVersion Int      @default(0)
 
   // Hidden from the Deals list and its table-level metrics (set = hidden,
   // null = visible). A working-view control only: the deal keeps its stage,
@@ -836,6 +841,8 @@ model Deal {
   // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
   // is retained as the originating/primary owner for existing metrics & reports.
   assignees          User[]                  @relation("DealAssignees")
+  emailLinks         EmailLink[]
+  cloudLinks         CloudFileLink[]
 
   @@index([stage])
   @@index([selectedBuyerId])
@@ -1061,6 +1068,8 @@ model Buyer {
   files          FileAttachment[]
   activityLogs   ActivityLog[]
   calendarEvents CalendarEvent[]
+  emailLinks     EmailLink[]
+  cloudLinks     CloudFileLink[]
 
   @@index([normalizedCompany])
   @@index([email])
@@ -1165,6 +1174,10 @@ model DealBuyerMessage {
   createdByUserId String?
   createdBy       User?              @relation("AuthoredMessages", fields: [createdByUserId], references: [id], onDelete: SetNull)
   threadId        String?
+  // The Outlook email this timeline entry records (services/mailSync.ts) —
+  // unique, so a re-sync or retried send never logs it twice.
+  emailMessageId  String?            @unique
+  emailMessage    EmailMessage?      @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 
@@ -1236,6 +1249,8 @@ model FileAttachment {
   supersededById String?
   supersededBy   FileAttachment?  @relation("FileSupersede", fields: [supersededById], references: [id], onDelete: SetNull)
   supersedes     FileAttachment[] @relation("FileSupersede")
+
+  cloudCopies CloudFileLink[] @relation("CloudCopySource")
 
   @@index([dealId])
   @@index([buyerId])
@@ -1422,7 +1437,7 @@ model ResearchDocument {
   partyInterests    Json?
   // Parser rules the party fields were derived with (domain/research PARTY_RULES_VERSION);
   // rows below the current version are re-derived once at boot.
-  partyRulesVersion Int      @default(0)
+  partyRulesVersion Int     @default(0)
 
   // Geography below county level. TX: abstract/survey. Elsewhere: trs
   // ("Sec 12 T2N R3W") or whatever the state's cadastral unit is.
@@ -1720,6 +1735,8 @@ model Contact {
   lists         ContactList[]     @relation("ContactListMembers")
   opportunities Opportunity[]
   dealSellers   DealSeller[]      @relation("ContactDealSellers")
+  emailLinks    EmailLink[]
+  cloudLinks    CloudFileLink[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -1779,6 +1796,11 @@ model ContactActivity {
 
   createdById String?
   createdBy   User?   @relation("ContactActivityAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // The Outlook email this EMAIL entry records (services/mailSync.ts) —
+  // unique, so a re-sync or retried send never logs it twice.
+  emailMessageId String?       @unique
+  emailMessage   EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1920,6 +1942,8 @@ model Opportunity {
 
   stageHistory OpportunityStageHistory[]
   activities   OpportunityActivity[]
+  emailLinks   EmailLink[]
+  cloudLinks   CloudFileLink[]
 
   @@index([organizationId, pipelineId, stage])
   @@index([contactId])
@@ -1964,4 +1988,235 @@ model DealContractExtension {
   createdAt        DateTime @default(now())
 
   @@index([dealId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Personal connected accounts — Outlook mail, OneDrive, Google Drive
+// (docs/integrations-outlook-drive.md). Each belongs to ONE team member: the
+// CRM acts through it only for its owner. Other members see only what the
+// owner links to records (emails, files) — never the mailbox or drive itself.
+// ---------------------------------------------------------------------------
+
+model ConnectedAccount {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User         @relation("ConnectedAccounts", fields: [userId], references: [id], onDelete: Cascade)
+  // "outlook" | "onedrive" | "googledrive"
+  provider          String
+  // The provider's stable id for the account (Graph user id, Google `sub`).
+  providerAccountId String
+  email             String?
+  displayName       String?
+  // Permissions the provider actually granted.
+  scopes            String[]     @default([])
+  // CONNECTED | NEEDS_RECONNECT | DISCONNECTED. Disconnecting keeps the row
+  // (and everything linked to records through it) but wipes `tokens`.
+  status            String       @default("CONNECTED")
+  // Encrypted token bundle (services/secrets.ts). Never serialized.
+  tokens            String?
+  // IDLE | SYNCING | ERROR
+  syncStatus        String       @default("IDLE")
+  // Incremental sync cursors (delta links, change page tokens). Not secrets.
+  syncState         Json?
+  lastSyncAt        DateTime?
+  lastSyncAttemptAt DateTime?
+  lastError         String?
+  // Outlook: link synced mail to contacts/buyers whose address it involves.
+  autoLinkEmail     Boolean      @default(true)
+  connectedAt       DateTime     @default(now())
+  disconnectedAt    DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  subscriptions ProviderSubscription[]
+  messages      EmailMessage[]
+  signatures    EmailSignature[]
+  cloudLinks    CloudFileLink[]
+
+  // One connection per provider account per organization (no duplicates).
+  @@unique([organizationId, provider, providerAccountId])
+  @@index([userId, provider])
+}
+
+// A Microsoft Graph change-notification subscription, renewed before expiry
+// (services/graphSubscriptions.ts).
+model ProviderSubscription {
+  id              String           @id @default(cuid())
+  accountId       String
+  account         ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  subscriptionId  String           @unique
+  resource        String
+  // sha256 of the clientState secret Graph echoes on each notification.
+  clientStateHash String
+  expiresAt       DateTime
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([expiresAt])
+}
+
+// An email sent from the CRM through a connected Outlook mailbox, or synced
+// from one because it involves a CRM record. Mail that matches nothing is
+// never stored. Bodies are sanitized HTML (services/emailHtml.ts).
+model EmailMessage {
+  id                String           @id @default(cuid())
+  organizationId    String
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  accountId         String
+  account           ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // Graph immutable id: stable across folder moves (draft → Sent Items).
+  providerMessageId String?
+  internetMessageId String?
+  conversationId    String?
+  // "in" (received) | "out" (sent from this mailbox)
+  direction         String
+  folder            String?
+  subject           String?
+  fromAddress       String?
+  fromName          String?
+  toRecipients      Json             @default("[]")
+  ccRecipients      Json             @default("[]")
+  bodyPreview       String?
+  bodyHtml          String?
+  hasAttachments    Boolean          @default(false)
+  sentAt            DateTime?
+  receivedAt        DateTime?
+  // CRM sends only: QUEUED | SENDING | SENT | FAILED. Null for synced mail.
+  sendStatus        String?
+  sendError         String?
+  // Idempotency key for CRM sends: a retried request never sends twice.
+  clientRequestId   String?
+  // Queued sends: the worker sends no earlier than this.
+  notBefore         DateTime?
+  attempts          Int              @default(0)
+  // Queued send: what to send (recipients, attachment refs, signature, links),
+  // cleared once Microsoft accepts it.
+  outbox            Json?
+  createdByUserId   String?
+  createdBy         User?            @relation("SentEmails", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  links            EmailLink[]
+  contactActivity  ContactActivity?
+  dealBuyerMessage DealBuyerMessage?
+
+  @@unique([accountId, providerMessageId])
+  @@unique([accountId, clientRequestId])
+  @@index([organizationId, conversationId])
+  @@index([sendStatus, notBefore])
+}
+
+// An email ↔ CRM record association. `recordKey` ("contact:<id>", …) keeps it
+// one row per email per record.
+model EmailLink {
+  id              String       @id @default(cuid())
+  organizationId  String
+  messageId       String
+  message         EmailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  recordKey       String
+  contactId       String?
+  contact         Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  dealId          String?
+  deal            Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  opportunityId   String?
+  opportunity     Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  buyerId         String?
+  buyer           Buyer?       @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  // AUTO (address / conversation match) | MANUAL | SENT (sent from the record)
+  source          String
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+
+  @@unique([messageId, recordKey])
+  @@index([contactId])
+  @@index([dealId])
+  @@index([opportunityId])
+  @@index([buyerId])
+}
+
+// An Outlook signature imported once into the CRM — Microsoft Graph offers no
+// API to read Outlook signatures. Sanitized HTML; inline images live in
+// EmailSignatureAsset and go out as inline (cid:) attachments.
+model EmailSignature {
+  id             String           @id @default(cuid())
+  organizationId String
+  accountId      String
+  account        ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name           String
+  html           String
+  // This account's default for new messages / for replies and forwards.
+  defaultNew     Boolean          @default(false)
+  defaultReply   Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  assets EmailSignatureAsset[]
+
+  @@index([accountId])
+}
+
+model EmailSignatureAsset {
+  id          String         @id @default(cuid())
+  signatureId String
+  signature   EmailSignature @relation(fields: [signatureId], references: [id], onDelete: Cascade)
+  // Referenced as cid:<contentId> in the signature HTML.
+  contentId   String
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  data        Bytes
+  createdAt   DateTime       @default(now())
+
+  @@unique([signatureId, contentId])
+}
+
+// A OneDrive / Google Drive file linked to a CRM record. The file stays in the
+// cloud (the provider keeps its permissions); the CRM keeps its id, name and
+// link. COPIED = a CRM document the user copied to their drive.
+model CloudFileLink {
+  id                 String           @id @default(cuid())
+  organizationId     String
+  accountId          String
+  account            ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider           String
+  providerFileId     String
+  // OneDrive: the drive the item lives in.
+  driveId            String?
+  name               String
+  mimeType           String?
+  sizeBytes          BigInt?
+  webUrl             String?
+  providerModifiedAt DateTime?
+  // LINKED (picked from the drive) | COPIED (a CRM document copied to it)
+  origin             String
+  sourceAttachmentId String?
+  sourceAttachment   FileAttachment?  @relation("CloudCopySource", fields: [sourceAttachmentId], references: [id], onDelete: SetNull)
+  // OK | MISSING (deleted or trashed at the provider) | NO_ACCESS
+  status             String           @default("OK")
+  // The record's documents folder it shows under.
+  folder             String           @default("Other")
+  recordKey          String
+  contactId          String?
+  contact            Contact?         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  dealId             String?
+  deal               Deal?            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  opportunityId      String?
+  opportunity        Opportunity?     @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  buyerId            String?
+  buyer              Buyer?           @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  createdByUserId    String?
+  createdBy          User?            @relation("CloudLinksCreated", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  lastCheckedAt      DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([accountId, providerFileId, recordKey])
+  @@index([accountId, providerFileId])
+  @@index([contactId])
+  @@index([dealId])
+  @@index([opportunityId])
+  @@index([buyerId])
 }

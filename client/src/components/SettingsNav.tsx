@@ -49,7 +49,7 @@ function useRail(): { label: string; items: RailItem[] }[] {
       label: "Connections",
       items: [
         { label: "Portal", path: "/settings/portal", show: can("managePortal") },
-        { label: "Integrations", path: "/settings/integrations", show: can("manageApiIntegrations") },
+        { label: "Integrations", path: "/settings/integrations", show: can("manageApiIntegrations") || can("sendEmail") || can("manageDocuments") },
       ],
     },
   ];

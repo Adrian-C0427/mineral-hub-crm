@@ -31,6 +31,8 @@ const Research = lazy(() => import("./pages/Research").then((m) => ({ default: m
 const Valuation = lazy(() => import("./pages/Valuation").then((m) => ({ default: m.Valuation })));
 // Calendar — events plus closings, follow-ups, and tasks drawn from existing records.
 const Calendar = lazy(() => import("./pages/Calendar").then((m) => ({ default: m.Calendar })));
+const Files = lazy(() => import("./pages/Files").then((m) => ({ default: m.Files })));
+const Inbox = lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Inbox })));
 // Mineral Assets (portfolio) — the detail view pulls in recharts + MapLibre.
 const MineralAssets = lazy(() => import("./pages/MineralAssets").then((m) => ({ default: m.MineralAssets })));
 const MineralAssetDetail = lazy(() => import("./pages/MineralAssetDetail").then((m) => ({ default: m.MineralAssetDetail })));
@@ -47,9 +49,9 @@ const ContactDetail = lazy(() => import("./pages/ContactDetail").then((m) => ({ 
 const Opportunity = lazy(() => import("./pages/Opportunity").then((m) => ({ default: m.Opportunity })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
-function Guard({ perm, children }: { perm: string; children: ReactNode }) {
+function Guard({ perm, children }: { perm: string | string[]; children: ReactNode }) {
   const { can } = useAuth();
-  return can(perm) ? <>{children}</> : <Navigate to="/" replace />;
+  return (Array.isArray(perm) ? perm.some(can) : can(perm)) ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 /** Blocking screen shown when the account is flagged mustChangePassword. */
@@ -135,6 +137,8 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/pipeline" element={<Guard perm="viewDeals"><Pipeline /></Guard>} />
           <Route path="/calendar" element={<Suspense fallback={<Spinner label="Loading calendar…" />}><Calendar /></Suspense>} />
+          <Route path="/inbox" element={<Guard perm="sendEmail"><Suspense fallback={<Spinner label="Loading inbox…" />}><Inbox /></Suspense></Guard>} />
+          <Route path="/files" element={<Guard perm="manageDocuments"><Suspense fallback={<Spinner label="Loading files…" />}><Files /></Suspense></Guard>} />
           <Route path="/deals" element={<Guard perm="viewDeals"><Deals scope="all" /></Guard>} />
           <Route path="/deals/active" element={<Guard perm="viewDeals"><Deals scope="active" /></Guard>} />
           <Route path="/deals/closed" element={<Guard perm="viewDeals"><Deals scope="closed" /></Guard>} />
@@ -159,7 +163,7 @@ export function App() {
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="/settings/general" element={<SettingsGeneral />} />
           <Route path="/settings/portal" element={<Guard perm="managePortal"><SettingsPortal /></Guard>} />
-          <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
+          <Route path="/settings/integrations" element={<Guard perm={["manageApiIntegrations", "sendEmail", "manageDocuments"]}><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
           {/* Signed-out-only pages: once signed in they go to the Dashboard, as before. */}
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/reset-password" element={<Navigate to="/" replace />} />

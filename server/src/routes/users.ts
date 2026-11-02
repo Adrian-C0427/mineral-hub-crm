@@ -8,6 +8,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { demoReadOnly } from "../middleware/demo.js";
 import { normalizePhone } from "../domain/phone.js";
 import { rotateTeamId, revokeInvitesKnownTo } from "../services/org.js";
+import { disconnectMemberAccounts } from "../services/connected/accounts.js";
 
 export const usersRouter = Router();
 
@@ -197,6 +198,8 @@ usersRouter.delete(
       const invitesRevoked = await revokeInvitesKnownTo(orgId(req), target, tx);
       return { teamId: await rotateTeamId(orgId(req), tx), invitesRevoked };
     });
+    // Their own mailbox / drive connections must not outlive the membership.
+    await disconnectMemberAccounts(orgId(req), target.id, req.user!.id);
     res.json({ ok: true, teamId, invitesRevoked });
   }),
 );
