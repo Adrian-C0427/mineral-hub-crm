@@ -1159,8 +1159,7 @@ function CreateTaskModal({ users, onClose, onCreated }: {
 }) {
   const { user } = useAuth();
   return (
-    <TaskFormModal mode="create" initial={newTaskValues(user?.id ?? "")} users={users} dueRequired
-      subtitle={<>For you or a teammate. Assigned teammates are notified.</>} onClose={onClose}
+    <TaskFormModal mode="create" initial={newTaskValues(user?.id ?? "")} users={users} dueRequired notifyAssignee onClose={onClose}
       onSubmit={async (v) => {
         const created = await api.post<DashTask & { notified: boolean }>("/tasks", {
           title: v.title.trim(), details: v.details.trim() || null, priority: v.priority, dueDate: v.due,
@@ -1210,7 +1209,7 @@ function TaskDetailModal({ id, users, onClose, onChanged }: {
   if (editing && task) {
     return (
       <TaskFormModal mode="edit" initial={dashTaskValues(task)} users={users} assigneeName={task.assignedTo?.name}
-        dueRequired={!task.contactId} detailsRequired={!!task.contactId}
+        dueRequired={!task.contactId} detailsRequired={!!task.contactId} notifyAssignee={!task.contactId}
         subtitle={task.contactName ? <>On {task.contactName}</> : undefined}
         onClose={() => setEditing(false)}
         onSubmit={async (v) => {

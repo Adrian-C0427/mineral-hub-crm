@@ -352,7 +352,7 @@ export function Modal({
   wide,
   dirty,
 }: {
-  title: string;
+  title: ReactNode;
   /** Dim one-liner under the title (reference modal header). */
   subtitle?: ReactNode;
   children: ReactNode;
