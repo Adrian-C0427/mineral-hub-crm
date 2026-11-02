@@ -6,6 +6,8 @@
  * router (routes/opportunities.ts) does the database work.
  */
 import { normalizePhone } from "./phone.js";
+import { personName } from "./contactName.js";
+import { contactPersonName } from "./sellerContact.js";
 
 export const OPPORTUNITY_ACTIVITY_KINDS = ["NOTE", "CALL", "EMAIL", "TEXT", "MEETING"] as const;
 export const CONVERT_MODES = ["MANUAL", "AUTO"] as const;
@@ -279,6 +281,19 @@ export interface OpportunityRow {
   convertedAt: Date | null;
   closeReason: string | null;
   createdAt: Date;
+  /** The linked Contact's names, when loaded (see sellerOf). */
+  contact?: Pick<OpportunityContactRow, "firstName" | "middleName" | "lastName" | "entityName"> | null;
+}
+
+/**
+ * The seller a card shows: the linked Contact's current name and entity over
+ * the copy stored when the seller block was last saved, so a name changed on
+ * the Contact Profile (a middle name added, say) reads the same on the board,
+ * in its search and on the profile.
+ */
+function sellerOf(o: OpportunityRow): { sellerName: string | null; companyName: string | null } {
+  if (!o.contact) return { sellerName: o.sellerName, companyName: o.companyName };
+  return { sellerName: personName(contactPersonName(o.contact)) || o.sellerName, companyName: o.contact.entityName || o.companyName };
 }
 
 export interface OpportunityContactRow {
@@ -313,8 +328,7 @@ export function serializeOpportunitySummary(o: OpportunityRow) {
     currentStageEnteredAt: o.currentStageEnteredAt,
     owner: userRef(o.owner),
     contactId: o.contactId,
-    sellerName: o.sellerName,
-    companyName: o.companyName,
+    ...sellerOf(o),
     state: o.state,
     county: o.county,
     abstract: o.abstract,

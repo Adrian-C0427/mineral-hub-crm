@@ -158,6 +158,13 @@ describe("serializers", () => {
     state: "TX", county: "Leon", abstract: "A-1", survey: "Sv", estAcres: 1, estNma: 2, estNra: 3, source: "src", notes: "n",
     lastActivityAt: t, nextFollowUpDate: null, convertedDealId: null, convertedAt: null, closeReason: null, createdAt: t,
   };
+  it("summary shows the linked contact's current name and entity over the stored copy", () => {
+    const linked = { ...row, contact: { firstName: "Mary", middleName: "Ann", lastName: "Hernandez", entityName: null } };
+    expect(serializeOpportunitySummary(linked)).toMatchObject({ sellerName: "Mary Ann Hernandez", companyName: null });
+    const entity = { ...row, companyName: "Old LLC", contact: { firstName: "Pecan LLC", middleName: null, lastName: "", entityName: "Pecan LLC" } };
+    expect(serializeOpportunitySummary(entity)).toMatchObject({ sellerName: "S", companyName: "Pecan LLC" });
+    expect(serializeOpportunitySummary({ ...row, contact: null })).toMatchObject({ sellerName: "S" });
+  });
   it("summary carries the board fields and no notes/phone/email", () => {
     const s = serializeOpportunitySummary(row);
     expect(s).toMatchObject({ id: "o1", owner: { id: "u1", name: "Ann", firstName: null, lastName: null, avatarColor: null }, estNma: 2, source: "src" });

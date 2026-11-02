@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import {
-  contactPatchFromSellerPatch, contactSyncFor, dealSellerFromInfo, matchSellerContact, opportunitySellerFromInfo, overlayContact,
+  contactPatchFromSellerPatch, contactSyncFor, dealSellerFromInfo, dealSellerNames, matchSellerContact, opportunitySellerFromInfo, overlayContact,
   resolveSellerContact, SYSTEM_CONTACT_ACCESS, sellerInfoSchema, type SellerContactRow,
 } from "./sellerContact.js";
 import { contactName, personName } from "./contactName.js";
@@ -208,7 +208,7 @@ describe("middle name", () => {
     expect(opportunitySellerFromInfo(info({ contactId: "c1" }), ann).sellerName).toBe("Mary Ann Hernandez");
     expect(opportunitySellerFromInfo(info({ firstName: "Mary", middleName: "Jo", lastName: "Hernandez" }), ann).sellerName).toBe("Mary Jo Hernandez");
   });
-  it("edits mirror the middle name onto the contact (a cleared one clears it); the overlay prefers the contact's", () => {
+  it("edits mirror the middle name onto the contact (a cleared one clears it); the overlay shows the contact's", () => {
     expect(contactPatchFromSellerPatch({ middleName: "Ann" })).toEqual({ middleName: "Ann" });
     expect(contactPatchFromSellerPatch({ middleName: "" })).toEqual({ middleName: null });
     const c = contact({ middleName: "Ann" });
@@ -216,6 +216,19 @@ describe("middle name", () => {
     expect(contactSyncFor(SYSTEM_CONTACT_ACCESS, { middleName: null }, c)).toEqual({ middleName: null });
     const row = { firstName: "Mary", middleName: "Old", lastName: "Hernandez", companyName: null, primaryPhone: null, email: null, mailingAddress: null, mailingCity: null, mailingState: null, mailingZip: null };
     expect(overlayContact(row, c).middleName).toBe("Ann");
-    expect(overlayContact(row, contact()).middleName).toBe("Old");
+    // Cleared on the Contact Profile → cleared on every linked deal too.
+    expect(overlayContact(row, contact()).middleName).toBeNull();
+    // An entity-only contact says nothing about the person: the row's stays.
+    const trust = contact({ firstName: "Pecan Trust", lastName: "", entityName: "Pecan Trust" });
+    expect(overlayContact(row, trust)).toMatchObject({ firstName: "Mary", middleName: "Old", companyName: "Pecan Trust" });
+  });
+  it("the Deals search reads each seller through its contact: First Middle Last, the entity, then the legacy names", () => {
+    const row = (over: Record<string, unknown>) => ({ firstName: null, middleName: null, lastName: null, companyName: null, trustName: null, contact: null, ...over });
+    expect(dealSellerNames(["Old Legacy Name"], [
+      row({ firstName: "Mary", lastName: "Hernandez", contact: contact({ middleName: "Ann" }) }),
+      row({ companyName: "Pecan LLC", trustName: "Pecan Family Trust" }),
+      row({ firstName: "old legacy", lastName: "name" }),
+    ])).toEqual(["Old Legacy Name", "Mary Ann Hernandez", "Pecan LLC", "Pecan Family Trust"]);
+    expect(dealSellerNames([], [])).toEqual([]);
   });
 });

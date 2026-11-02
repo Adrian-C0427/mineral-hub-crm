@@ -29,6 +29,14 @@ describe("matchSellerToContact — only reliable identifiers link an old seller 
   it("never links on a name alone", () => {
     expect(matchSellerToContact(seller({ firstName: "Mary", lastName: "Hernandez" }), contacts, null)).toBeNull();
   });
+  it("on a shared phone, a different middle name is not the same name", () => {
+    const onePhone = [
+      { id: "c_a", firstName: "John", middleName: "A", lastName: "Smith", entityName: null, email: null, phone: "9035550000" },
+      { id: "c_b", firstName: "John", middleName: "B", lastName: "Smith", entityName: null, email: null, phone: "9035550000" },
+    ];
+    expect(matchSellerToContact(seller({ primaryPhone: "9035550000", firstName: "John", middleName: "B", lastName: "Smith" }), onePhone, null)).toBe("c_b");
+    expect(matchSellerToContact(seller({ primaryPhone: "9035550000", firstName: "John", lastName: "Smith" }), onePhone, null)).toBe("c_a"); // no middle: the first answering
+  });
 });
 
 describe("dealStatus — the system status behind a contact's mineral interest", () => {
@@ -62,5 +70,15 @@ describe("create pass — building seller blocks from stored records, and refusi
     expect(ambiguityOf(sellerInfoFromStored({ firstName: "Mary", lastName: "Hernandez" })!, two)).toMatch(/share the name/);
     expect(ambiguityOf(sellerInfoFromStored({ firstName: "Mary", lastName: "Hernandez" })!, two.slice(0, 1))).toBeNull();
     expect(ambiguityOf(sellerInfoFromStored({ firstName: "Jose", lastName: "Hernandez" })!, two)).toBeNull();
+  });
+  it("middle names: two different ones are two people; a stored seller's middle name is carried", () => {
+    const annJo = [
+      { id: "a", firstName: "Mary", middleName: "Ann", lastName: "Hernandez", entityName: null, email: null, phone: null },
+      { id: "b", firstName: "Mary", middleName: "Jo", lastName: "Hernandez", entityName: null, email: null, phone: null },
+    ];
+    const ann = sellerInfoFromStored({ firstName: "Mary", middleName: "Ann", lastName: "Hernandez" })!;
+    expect(ann).toMatchObject({ firstName: "Mary", middleName: "Ann", lastName: "Hernandez" });
+    expect(ambiguityOf(ann, annJo)).toBeNull();
+    expect(ambiguityOf(sellerInfoFromStored({ firstName: "Mary", lastName: "Hernandez" })!, annJo)).toMatch(/share the name/);
   });
 });

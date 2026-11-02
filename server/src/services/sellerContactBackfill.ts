@@ -2,7 +2,7 @@ import { prisma } from "../db.js";
 import type { Prisma } from "@prisma/client";
 import { normalizePhone } from "../domain/phone.js";
 import { splitPersonName } from "../domain/opportunities.js";
-import { dealSellerFromInfo, opportunitySellerFromInfo, resolveSellerContact, sellerInfoSchema, type SellerInfo } from "../domain/sellerContact.js";
+import { dealSellerFromInfo, opportunitySellerFromInfo, resolveSellerContact, sameMiddle, sellerInfoSchema, type SellerInfo } from "../domain/sellerContact.js";
 
 /**
  * One-time, idempotent: deals and opportunities recorded before sellers
@@ -12,7 +12,8 @@ import { dealSellerFromInfo, opportunitySellerFromInfo, resolveSellerContact, se
  *  it reliably is: the converted opportunity's contact (primary seller), an
  *  exact email, or an exact phone number (a phone identifies the contact on
  *  its own; when several contacts share it, the one with the same name, else
- *  the most recently updated). Never a similar name.
+ *  the most recently updated). Never a similar name. "The same name" counts
+ *  middle names: they agree unless both are given and differ (sameMiddle).
  *
  *  Pass 2 — CREATE. What is still unlinked but carries seller information
  *  (a name, an entity, an email or a phone) goes through the same resolution
@@ -37,9 +38,9 @@ import { dealSellerFromInfo, opportunitySellerFromInfo, resolveSellerContact, se
 
 interface SellerRow {
   id: string; dealId: string; isPrimary: boolean; contactId: string | null;
-  firstName: string | null; lastName: string | null; companyName: string | null; email: string | null; primaryPhone: string | null;
+  firstName: string | null; middleName?: string | null; lastName: string | null; companyName: string | null; email: string | null; primaryPhone: string | null;
 }
-interface ContactRow { id: string; firstName: string; lastName: string; entityName: string | null; email: string | null; phone: string | null }
+interface ContactRow { id: string; firstName: string; middleName?: string | null; lastName: string; entityName: string | null; email: string | null; phone: string | null }
 
 const lower = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
 
@@ -56,7 +57,7 @@ export function matchSellerToContact(s: SellerRow, contacts: ContactRow[], conve
     const first = lower(s.firstName), last = lower(s.lastName), company = lower(s.companyName);
     const byPhone = contacts.filter((x) => normalizePhone(x.phone) === phone);
     const named = byPhone.find((x) =>
-      (first && last && lower(x.firstName) === first && lower(x.lastName) === last) || (company && lower(x.entityName) === company));
+      (first && last && lower(x.firstName) === first && sameMiddle(x.middleName, s.middleName) && lower(x.lastName) === last) || (company && lower(x.entityName) === company));
     const c = named ?? byPhone[0];
     if (c) return c.id;
   }
@@ -74,13 +75,13 @@ export function ambiguityOf(s: SellerInfo, contacts: ContactRow[]): string | nul
     return n > 1 ? `${n} contacts share the email` : null;
   }
   const first = lower(s.firstName), last = lower(s.lastName), company = lower(s.companyName);
-  const sameName = (c: ContactRow) => (first || last ? lower(c.firstName) === first && lower(c.lastName) === last : true) && lower(c.entityName) === company;
+  const sameName = (c: ContactRow) => (first || last ? lower(c.firstName) === first && sameMiddle(c.middleName, s.middleName) && lower(c.lastName) === last : true) && lower(c.entityName) === company;
   if (s.phone) {
     // A phone identifies the contact; several contacts on one phone are only
     // ambiguous when none of them carries this seller's name.
     const byPhone = contacts.filter((c) => normalizePhone(c.phone) === s.phone);
     if (byPhone.length <= 1) return null;
-    const named = byPhone.filter((c) => (first && last && lower(c.firstName) === first && lower(c.lastName) === last) || (company && lower(c.entityName) === company));
+    const named = byPhone.filter((c) => (first && last && lower(c.firstName) === first && sameMiddle(c.middleName, s.middleName) && lower(c.lastName) === last) || (company && lower(c.entityName) === company));
     return named.length === 1 ? null : `${byPhone.length} contacts share the phone`;
   }
   const n = contacts.filter(sameName).length;
@@ -99,12 +100,14 @@ export function sellerInfoFromLegacyName(name: string): SellerInfo | null {
 
 /** A stored seller row / opportunity as a seller block (an unusable email is dropped rather than blocking the row). */
 export function sellerInfoFromStored(s: {
-  firstName?: string | null; lastName?: string | null; companyName?: string | null; trustName?: string | null; sellerName?: string | null;
+  firstName?: string | null; middleName?: string | null; lastName?: string | null; companyName?: string | null; trustName?: string | null; sellerName?: string | null;
   email?: string | null; phone?: string | null; mailingAddress?: string | null; mailingCity?: string | null; mailingState?: string | null; mailingZip?: string | null;
 }): SellerInfo | null {
-  const person = s.sellerName && !s.firstName && !s.lastName ? splitPersonName(s.sellerName) : { firstName: s.firstName ?? null, lastName: s.lastName ?? null };
+  const person = s.sellerName && !s.firstName && !s.lastName
+    ? { ...splitPersonName(s.sellerName), middleName: null }
+    : { firstName: s.firstName ?? null, middleName: s.middleName ?? null, lastName: s.lastName ?? null };
   const base = {
-    firstName: person.firstName, lastName: person.lastName, companyName: s.companyName ?? s.trustName ?? null,
+    firstName: person.firstName, middleName: person.middleName, lastName: person.lastName, companyName: s.companyName ?? s.trustName ?? null,
     phone: s.phone ?? null, mailingAddress: s.mailingAddress ?? null, mailingCity: s.mailingCity ?? null, mailingState: s.mailingState ?? null, mailingZip: s.mailingZip ?? null,
   };
   const withEmail = sellerInfoSchema.safeParse({ ...base, email: s.email ?? null });
@@ -136,7 +139,7 @@ export async function backfillSellerContacts(): Promise<Report> {
 
 /** Pass 1 — link by reliable identifiers only. */
 async function linkPass(organizationId: string, report: Report): Promise<void> {
-  const contacts = await prisma.contact.findMany({ where: { organizationId }, select: { id: true, firstName: true, lastName: true, entityName: true, email: true, phone: true } });
+  const contacts = await prisma.contact.findMany({ where: { organizationId }, select: { id: true, firstName: true, middleName: true, lastName: true, entityName: true, email: true, phone: true } });
   const converted = await prisma.opportunity.findMany({ where: { organizationId, convertedDealId: { not: null }, contactId: { not: null } }, select: { convertedDealId: true, contactId: true } });
   const convertedContact = new Map(converted.map((o) => [o.convertedDealId!, o.contactId!]));
   if (contacts.length === 0) return;
@@ -144,7 +147,7 @@ async function linkPass(organizationId: string, report: Report): Promise<void> {
   for (;;) {
     const rows = await prisma.dealSeller.findMany({
       where: { contactId: null, deal: { organizationId }, ...(cursor ? { id: { gt: cursor } } : {}) },
-      select: { id: true, dealId: true, isPrimary: true, contactId: true, firstName: true, lastName: true, companyName: true, email: true, primaryPhone: true },
+      select: { id: true, dealId: true, isPrimary: true, contactId: true, firstName: true, middleName: true, lastName: true, companyName: true, email: true, primaryPhone: true },
       orderBy: { id: "asc" }, take: BATCH,
     });
     if (rows.length === 0) break;
@@ -160,7 +163,7 @@ async function linkPass(organizationId: string, report: Report): Promise<void> {
 /** Pass 2 — reuse or create contacts from the stored seller details. */
 async function createPass(organizationId: string, report: Report): Promise<void> {
   const notFound = (m: string) => new Error(m);
-  const contactsNow = () => prisma.contact.findMany({ where: { organizationId }, select: { id: true, firstName: true, lastName: true, entityName: true, email: true, phone: true } });
+  const contactsNow = () => prisma.contact.findMany({ where: { organizationId }, select: { id: true, firstName: true, middleName: true, lastName: true, entityName: true, email: true, phone: true } });
 
   // 2a. Deals with no seller rows at all but legacy seller names → one seller row per name.
   const nameOnly = await prisma.deal.findMany({
@@ -184,7 +187,7 @@ async function createPass(organizationId: string, report: Report): Promise<void>
   const sellers = await prisma.dealSeller.findMany({
     where: { contactId: null, deal: { organizationId } },
     select: {
-      id: true, dealId: true, firstName: true, lastName: true, companyName: true, trustName: true, email: true, primaryPhone: true,
+      id: true, dealId: true, firstName: true, middleName: true, lastName: true, companyName: true, trustName: true, email: true, primaryPhone: true,
       mailingAddress: true, mailingCity: true, mailingState: true, mailingZip: true, deal: { select: { relationshipOwnerId: true, sellerNames: true } },
     },
     orderBy: { createdAt: "asc" },
@@ -207,7 +210,7 @@ async function createPass(organizationId: string, report: Report): Promise<void>
         data: {
           contactId: r.contact.id,
           // Only blanks are filled from the contact; the row's own values stay.
-          firstName: s.firstName ?? fill.firstName, lastName: s.lastName ?? fill.lastName, companyName: s.companyName ?? fill.companyName,
+          firstName: s.firstName ?? fill.firstName, middleName: s.middleName ?? fill.middleName, lastName: s.lastName ?? fill.lastName, companyName: s.companyName ?? fill.companyName,
           primaryPhone: s.primaryPhone ?? fill.primaryPhone, email: s.email ?? fill.email,
           mailingAddress: s.mailingAddress ?? fill.mailingAddress, mailingCity: s.mailingCity ?? fill.mailingCity, mailingState: s.mailingState ?? fill.mailingState, mailingZip: s.mailingZip ?? fill.mailingZip,
         },
