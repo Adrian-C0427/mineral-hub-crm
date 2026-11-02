@@ -1711,10 +1711,19 @@ researchRouter.get(
     const where = docWhere(org, f, win);
     applyDocSearch(where, q, instrument);
     if (sortBy === "abstractId") {
-      const all = await prisma.researchDocument.findMany({ where, select: { id: true, abstractId: true, abstractIds: true, recordingDate: true } });
+      // Ordered in process (abstractOrderedPage), so the read is capped the way
+      // /records/ids is: the newest MAX_SELECTABLE_IDS matching rows are
+      // ordered; `total` is the true count and `truncated` says when the cap bit.
+      const [total, all] = await Promise.all([
+        prisma.researchDocument.count({ where }),
+        prisma.researchDocument.findMany({
+          where, select: { id: true, abstractId: true, abstractIds: true, recordingDate: true },
+          orderBy: [{ recordingDate: "desc" }, { id: "asc" }], take: MAX_SELECTABLE_IDS,
+        }),
+      ]);
       const ids = abstractOrderedPage(all.map((r) => ({ id: r.id, abstracts: r.abstractIds.length ? r.abstractIds : abstractNumbers(r.abstractId), date: r.recordingDate })), sortDir, page, pageSize);
       const rows = inOrder(await prisma.researchDocument.findMany({ where: { id: { in: ids } } }), ids);
-      return res.json({ total: all.length, page, pageSize, rows });
+      return res.json({ total, page, pageSize, rows, truncated: total > all.length });
     }
     const [total, rows] = await Promise.all([
       prisma.researchDocument.count({ where }),
@@ -1739,10 +1748,17 @@ researchRouter.get(
     const where = permitWhere(org, f, win);
     applyPermitSearch(where, q, instrument);
     if (sortBy === "abstractId") {
-      const all = await prisma.researchPermit.findMany({ where, select: { id: true, abstractId: true, activityDate: true } });
+      // Capped like the documents' abstract order above (and /records/ids).
+      const [total, all] = await Promise.all([
+        prisma.researchPermit.count({ where }),
+        prisma.researchPermit.findMany({
+          where, select: { id: true, abstractId: true, activityDate: true },
+          orderBy: [{ activityDate: "desc" }, { id: "asc" }], take: MAX_SELECTABLE_IDS,
+        }),
+      ]);
       const ids = abstractOrderedPage(all.map((r) => ({ id: r.id, abstracts: abstractNumbers(r.abstractId), date: r.activityDate })), sortDir, page, pageSize);
       const rows = inOrder(await prisma.researchPermit.findMany({ where: { id: { in: ids } } }), ids);
-      return res.json({ total: all.length, page, pageSize, rows });
+      return res.json({ total, page, pageSize, rows, truncated: total > all.length });
     }
     const [total, rows] = await Promise.all([
       prisma.researchPermit.count({ where }),
@@ -1842,6 +1858,24 @@ researchRouter.get(
   }),
 );
 
+/**
+ * Import replays are the heaviest thing `manageResearchData` can trigger: a
+ * full parse of up to MAX_INGEST_ROWS plus a read of the org's existing
+ * records in the file's counties. /analyze and /preview write nothing, so
+ * they are free for the caller to repeat — cap them (mirrors the contacts
+ * importLimiter), keyed on the user like the router's own ceiling. The
+ * preview re-runs on every mapping change (debounced), so the budget clears a
+ * fiddly mapping session while still bounding a script.
+ */
+const ingestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many import requests. Wait a few minutes and try again." },
+});
+
 const analyzeSchema = z.object({
   category: z.enum(["deeds", "leases", "permits"]),
   csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large"),
@@ -1850,6 +1884,7 @@ const analyzeSchema = z.object({
 researchRouter.post(
   "/ingest/analyze",
   requirePermission("manageResearchData"),
+  ingestLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { category, csv } = analyzeSchema.parse(req.body);
     const { kind } = resolveCategory(category);
@@ -1877,6 +1912,7 @@ const commitSchema = z.object({
 researchRouter.post(
   "/ingest/commit",
   requirePermission("manageResearchData"),
+  ingestLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { category, csv, mapping, filename, assignedState, assignedCounty } = commitSchema.parse(req.body);
     // All ingest logic (dedup, classification, geography normalization, the
@@ -1896,6 +1932,7 @@ researchRouter.post(
 researchRouter.post(
   "/ingest/preview",
   requirePermission("manageResearchData"),
+  ingestLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { category, csv, mapping, assignedState, assignedCounty } = commitSchema.parse(req.body);
     const summary = await ingestResearchCsv({
