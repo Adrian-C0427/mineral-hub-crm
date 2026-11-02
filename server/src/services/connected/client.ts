@@ -242,7 +242,7 @@ export async function providerFetch(account: ConnectedAccount, url: string, opts
     logLine(account, method, u, res.status);
     const what = MESSAGES[kind];
     throw new ProviderError(
-      what ? `${providerName(account)} ${what}.` : `${providerName(account)} returned an error${err.message ? `: ${err.message}` : ` (HTTP ${res.status})`}.`,
+      what ? `${providerName(account)} ${what}.` : `${providerName(account)} returned an error${err.message ? `: ${err.message.replace(/[.\s]+$/, "")}` : ` (HTTP ${res.status})`}.`,
       kind, res.status, err.code,
     );
   }

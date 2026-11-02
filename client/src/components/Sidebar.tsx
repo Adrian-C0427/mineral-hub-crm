@@ -57,6 +57,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   ] },
   // The member's own connected Outlook / OneDrive / Google Drive.
   { label: "Workspace", items: [
+    { label: "Inbox", icon: pathIcon("M4 13h4l2 3h4l2-3h4M4 13l2-7h12l2 7v6H4z"), to: "/inbox", perm: "sendEmail", desc: "Your Outlook mailbox — read, reply, and file email on records" },
     { label: "Files", icon: pathIcon("M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16"), to: "/files", perm: "manageDocuments", desc: "Your OneDrive and Google Drive — browse, organize, and link files to records" },
   ] },
   { label: "Analysis", items: [

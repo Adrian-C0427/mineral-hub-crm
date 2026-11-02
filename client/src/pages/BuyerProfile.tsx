@@ -23,6 +23,7 @@ import type { BuyBox, Relationship, UserLite, UserRef } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { useUnsavedSection, guarded } from "../lib/unsaved";
 import { LinkedFilesPanel } from "../components/CloudLinks";
+import { RecordEmails } from "../components/mail/RecordEmails";
 
 interface BuyerProfileData {
   id: string;
@@ -449,6 +450,8 @@ export function BuyerProfile() {
         )}
       </div>
 
+      {/* Emails with this buyer (sent from the CRM or filed from Outlook). */}
+      <RecordEmails record={{ type: "buyer", id: b.id }} name={view.companyName} defaultTo={b.email ? [{ name: b.name, address: b.email }] : []} />
       {/* OneDrive / Google Drive files linked to this buyer (no copy kept). */}
       {can("viewDocuments") && <LinkedFilesPanel record={{ type: "buyer", id: b.id }} canEdit={can("manageDocuments")} />}
 

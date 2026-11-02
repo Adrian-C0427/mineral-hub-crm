@@ -23,6 +23,7 @@ import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone"
 import { useIsPhonePortrait } from "../lib/mobile";
 import type { ContactMineralInterest, UserLite, UserRef } from "../types";
 import { LinkedFilesPanel } from "../components/CloudLinks";
+import { RecordEmails } from "../components/mail/RecordEmails";
 
 /**
  * Contact workspace (reference layout): left contact-details rail, center
@@ -227,6 +228,8 @@ export function ContactDetail() {
 
         {/* OneDrive / Google Drive files linked to this contact (no copy kept). */}
         {can("viewDocuments") && <LinkedFilesPanel record={{ type: "contact", id: contact.id }} canEdit={can("manageDocuments")} />}
+        {/* Emails with this contact (sent from the CRM or filed from Outlook). */}
+        <RecordEmails record={{ type: "contact", id: contact.id }} name={contact.name} defaultTo={contact.email ? [{ name: contact.name || null, address: contact.email }] : []} />
       </aside>
 
       {/* Phones only: quick actions + the tab strip that picks the visible pane. */}

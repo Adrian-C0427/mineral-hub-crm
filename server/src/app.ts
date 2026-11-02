@@ -37,6 +37,8 @@ import { calendarRouter } from "./routes/calendar.js";
 import { accountsRouter } from "./routes/accounts.js";
 import { cloudRouter } from "./routes/cloud.js";
 import { recordSearchRouter } from "./routes/recordSearch.js";
+import { mailRouter } from "./routes/mail.js";
+import { webhooksRouter } from "./routes/webhooks.js";
 
 export function createApp() {
   const app = express();
@@ -100,6 +102,9 @@ export function createApp() {
   // Showcase workspace: refuses destructive/sensitive writes for demo users
   // (after body parsing + auth, before every router). No-op for everyone else.
   app.use("/api", demoGuard);
+  // Public provider callbacks (Graph change notifications) — no session, so
+  // demoGuard (session-based) lets Microsoft through and refuses a demo user.
+  app.use("/api/webhooks", webhooksRouter);
 
   app.get("/health", (_req, res) => res.json({ ok: true, env: env.NODE_ENV }));
 
@@ -127,6 +132,7 @@ export function createApp() {
   app.use("/api/accounts", accountsRouter);
   app.use("/api/cloud", cloudRouter);
   app.use("/api/records", recordSearchRouter);
+  app.use("/api/mail", mailRouter);
   app.use("/api/research", researchRouter);
   app.use("/api/wells", wellsRouter);
   app.use("/api/ai", aiRouter);

@@ -255,6 +255,15 @@
   .dash-stack.customizing .dash-w { outline: 1px dashed var(--border); outline-offset: 2px; }
   .dash-stack .dash-cz-bar { position: static; }
   .dash-cz-banner { flex-wrap: wrap; gap: 10px; }
+  /* Inbox: one column — folders as a strip, list, then the reading pane. */
+  .ib { grid-template-columns: minmax(0, 1fr); }
+  .ib-folders { position: static; }
+  .ib-flist { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
+  .ib-folder { flex: none; }
+  .mc-lbl { width: 52px; }
+  .mc-bad, .mc-links-note { margin-left: 0; }
+  .mc-editor, .mc .mc-chips input { font-size: 16px; } /* no iOS focus zoom */
+  .sig-card-actions { margin-left: 0; }
   /* Cloud files: the browser drops its date/type columns; actions stay. */
   .cb-row { grid-template-columns: minmax(0, 1fr) 70px auto; }
   .cb-row .cb-kind, .cb-row .cb-date { display: none; }

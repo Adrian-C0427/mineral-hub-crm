@@ -23,6 +23,8 @@ import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
 import { ensureStages, activeStageKeys, isOpportunityPipeline, lockStageRow } from "../domain/stages.js";
 import { applyStageChange, applyStageUndo, signStageUndo, verifyStageUndo, STAGE_UNDO_MAX_TOKEN_BYTES } from "../services/stageUndo.js";
+import { loadUsableAccount } from "../services/connected/accounts.js";
+import { queueBulk } from "../services/mail/send.js";
 
 export const dealsRouter = Router();
 // All deal routes require membership in an organization and are scoped to it.
@@ -656,6 +658,11 @@ const sendEmailSchema = z.object({
   buyerIds: z.array(z.string().max(200)).min(1).max(1000),
   subject: z.string().min(1).max(500),
   body: z.string().min(1).max(100_000),
+  // Send from the member's own connected Outlook mailbox (services/mail/send.ts)
+  // instead of Resend: one personalized email per buyer, queued and paced to
+  // Outlook's sending limit, each with the mailbox's signature.
+  accountId: z.string().max(200).optional(),
+  signatureId: z.string().max(200).nullable().optional(),
 });
 
 /**
@@ -690,7 +697,7 @@ dealsRouter.post(
   requirePermission("sendEmail"),
   sendEmailLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { buyerIds, subject, body } = sendEmailSchema.parse(req.body);
+    const { buyerIds, subject, body, accountId, signatureId } = sendEmailSchema.parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
     const buyers = await prisma.buyer.findMany({
@@ -699,6 +706,28 @@ dealsRouter.post(
     });
 
     const threadId = `deal-${deal.id}-${Date.now()}`;
+    if (accountId) {
+      // Outlook: queue now; each email is logged on the deal only once Microsoft accepts it.
+      const account = await loadUsableAccount(orgId(req), req.user!.id, accountId, "outlook");
+      const skipped: { buyer: string; reason: string }[] = [];
+      const items = [];
+      for (const b of buyers) {
+        if (!b.email) { skipped.push({ buyer: b.name, reason: "no email on file" }); continue; }
+        const tokens = {
+          buyer: b.name, company: b.companyName, deal: deal.name,
+          county: deal.counties.join(", "), askPrice: deal.askPrice != null ? fmtMoney(deal.askPrice) : "",
+          sender: req.user!.name,
+        };
+        items.push({ buyerId: b.id, to: { name: b.name, address: b.email.toLowerCase() }, subject: personalize(subject, tokens), html: renderEmailBody(body, tokens) });
+      }
+      const queued = items.length ? await queueBulk({ account, userId: req.user!.id, dealId: deal.id, threadId, signatureId, items }) : 0;
+      await logActivity({
+        eventType: "DEAL_EMAILED",
+        summary: `${req.user!.name} queued "${deal.name}" to ${queued} buyer(s) from ${account.email ?? "Outlook"}`,
+        organizationId: orgId(req), actorUserId: req.user!.id, dealId: deal.id,
+      });
+      return res.json({ ok: true, sent: 0, queued, skipped, via: "outlook", threadId });
+    }
     const sent: string[] = [];
     const skipped: { buyer: string; reason: string }[] = [];
 

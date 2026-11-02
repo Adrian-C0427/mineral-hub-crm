@@ -13,8 +13,8 @@
 .cb-view.active { background: var(--chip); color: var(--ink); box-shadow: var(--shadow-segment); }
 .cb-search { flex: 1 1 220px; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--input); color: var(--ink-4); }
 .cb-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-.cb .cb-search input { flex: 1; min-width: 0; height: 100%; min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; font-size: 13px; }
-.cb .cb-search input:focus { border: 0; box-shadow: none; }
+.cb-search > input, .cb-search > input:hover { flex: 1; min-width: 0; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-size: 13px; }
+.cb-search > input:focus { border: 0; box-shadow: none; outline: none; }
 .cb-clear { min-height: 0; height: 24px; padding: 0 8px; border: 0; background: var(--hover); font-size: 12px; box-shadow: none; }
 .cb-tools { display: inline-flex; gap: 6px; margin-left: auto; }
 .cb-tools button { display: inline-flex; align-items: center; gap: 6px; }

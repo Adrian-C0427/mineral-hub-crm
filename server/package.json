@@ -41,6 +41,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.5.0",
     "nodemailer": "^10.2.1",
+    "sanitize-html": "2.18.1",
     "shpjs": "^6.2.0",
     "zod": "^4.6.7"
   },
@@ -54,6 +55,7 @@
     "@types/multer": "^1.4.11",
     "@types/node": "^20.14.0",
     "@types/nodemailer": "^6.4.24",
+    "@types/sanitize-html": "2.16.2",
     "prisma": "^5.18.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0"

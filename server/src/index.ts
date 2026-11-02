@@ -19,6 +19,7 @@ import { ensureRrcRefresh } from "./services/rrcRefresh.js";
 import { clearGisCaches } from "./routes/gis.js";
 import { rotateStoredSecrets } from "./services/secretsRotation.js";
 import { startAccountSyncScheduler } from "./services/connected/sync.js";
+import { startOutboxWorker } from "./services/mail/send.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
 assertProductionSecrets();
@@ -35,6 +36,8 @@ const app = createApp();
 startIntegrationScheduler();
 // Personal Outlook / OneDrive / Google Drive connections (services/connected/sync.ts).
 startAccountSyncScheduler();
+// Queued Outlook sends (bulk buyer emails), paced per mailbox.
+startOutboxWorker();
 // HighLevel SMS sync: resumes an interrupted import at boot; its 15-minute live
 // sync rides the integration scheduler's tick (services/highlevel/scheduler.ts).
 startHighLevelScheduler();

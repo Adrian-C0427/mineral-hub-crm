@@ -48,10 +48,16 @@ const GRAPH = "https://graph.microsoft.com/";
 const GOOGLE_DRIVE = "https://www.googleapis.com/auth/drive";
 
 const MS_IDENTITY = ["openid", "profile", "email", "offline_access", `${GRAPH}User.Read`];
-const MS_LABELS: Record<string, string> = {
+// Outlook and OneDrive share one Entra app registration, so Microsoft may
+// report both connections' permissions on either token — each card lists
+// only its own.
+const OUTLOOK_LABELS: Record<string, string> = {
   "user.read": "Your name and email address",
   "mail.readwrite": "Read and organize your mail",
   "mail.send": "Send mail as you",
+};
+const ONEDRIVE_LABELS: Record<string, string> = {
+  "user.read": "Your name and email address",
   "files.readwrite": "View and edit your OneDrive files",
 };
 
@@ -61,14 +67,14 @@ export const ACCOUNT_PROVIDER_DEFS: Record<AccountProvider, AccountProviderDef> 
     scopes: [...MS_IDENTITY, `${GRAPH}Mail.ReadWrite`, `${GRAPH}Mail.Send`],
     required: ["mail.readwrite", "mail.send"],
     permission: "sendEmail",
-    scopeLabels: MS_LABELS,
+    scopeLabels: OUTLOOK_LABELS,
   },
   onedrive: {
     key: "onedrive", name: "Microsoft OneDrive", family: "microsoft",
     scopes: [...MS_IDENTITY, `${GRAPH}Files.ReadWrite`],
     required: ["files.readwrite"],
     permission: "manageDocuments",
-    scopeLabels: MS_LABELS,
+    scopeLabels: ONEDRIVE_LABELS,
   },
   googledrive: {
     key: "googledrive", name: "Google Drive", family: "google",

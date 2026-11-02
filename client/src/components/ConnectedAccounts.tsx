@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import { ConfirmDialog } from "./ui";
 import { Tag } from "./kit";
 import { UserAvatar } from "./UserAvatar";
+import { SignaturesModal } from "./mail/Signatures";
 import { fmtDateTime } from "../lib/format";
 import {
   startAccountConnect, type AccountProvider, type AccountProviderInfo, type ConnectedAccount, type AccountsPayload,
@@ -50,6 +51,7 @@ export function ConnectedAccountsSection({ data, onReload, onMessage, onError }:
   const [busy, setBusy] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<ConnectedAccount | null>(null);
   const [results, setResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [signing, setSigning] = useState<ConnectedAccount | null>(null);
 
   // A sync in progress (ours or the background one): refresh until it settles.
   const syncing = data.accounts.some((a) => a.syncStatus === "SYNCING");
@@ -72,6 +74,10 @@ export function ConnectedAccountsSection({ data, onReload, onMessage, onError }:
       onReload();
     } catch (e) { onError(e instanceof ApiError ? e.message : "Sync failed"); }
     finally { setBusy(null); }
+  }
+  async function setAutoFile(a: ConnectedAccount, on: boolean) {
+    try { await api.patch(`/accounts/${a.id}`, { autoLinkEmail: on }); onReload(); }
+    catch (e) { onError(e instanceof ApiError ? e.message : "Couldn't save that setting"); }
   }
   async function disconnect(a: ConnectedAccount) {
     setBusy(`disconnect:${a.id}`);
@@ -101,9 +107,12 @@ export function ConnectedAccountsSection({ data, onReload, onMessage, onError }:
             onConnect={() => void connect(p.key)}
             onSync={(a) => void sync(a)}
             onDisconnect={setDisconnecting}
+            onSignatures={setSigning}
+            onAutoFile={(a, on) => void setAutoFile(a, on)}
           />
         ))}
       </div>
+      {signing && <SignaturesModal account={signing} onClose={() => setSigning(null)} />}
       {disconnecting && (
         <ConfirmDialog
           title={`Disconnect ${disconnecting.providerName}?`}
@@ -127,10 +136,11 @@ export function ConnectedAccountsSection({ data, onReload, onMessage, onError }:
   );
 }
 
-function ProviderCard({ p, accounts, busy, results, onConnect, onSync, onDisconnect }: {
+function ProviderCard({ p, accounts, busy, results, onConnect, onSync, onDisconnect, onSignatures, onAutoFile }: {
   p: AccountProviderInfo; accounts: ConnectedAccount[]; busy: string | null;
   results: Record<string, { ok: boolean; message: string }>;
   onConnect: () => void; onSync: (a: ConnectedAccount) => void; onDisconnect: (a: ConnectedAccount) => void;
+  onSignatures: (a: ConnectedAccount) => void; onAutoFile: (a: ConnectedAccount, on: boolean) => void;
 }) {
   const Icon = PROVIDER_ICON[p.key];
   const anyConnected = accounts.some((a) => a.status === "CONNECTED");
@@ -147,11 +157,11 @@ function ProviderCard({ p, accounts, busy, results, onConnect, onSync, onDisconn
         <span className="integration-logo" style={{ color: PROVIDER_COLOR[p.key] }}><Icon size={20} /></span>
         <div className="integration-id">
           <div className="integration-name">{p.name}</div>
-          <div className="integration-chips"><span className="chip-mini">OAuth 2.0 · your account</span></div>
+          <div className="integration-chips"><span className="chip-mini" title="Connected with OAuth 2.0 to your own account">Your account</span></div>
         </div>
         {headTag}
       </div>
-      <p className="integration-desc">{PROVIDER_BLURB[p.key]}</p>
+      <p className="integration-desc" title={PROVIDER_BLURB[p.key]}>{PROVIDER_BLURB[p.key]}</p>
 
       {p.legacyConnectedAt && (
         <p className="integration-meta">
@@ -185,6 +195,12 @@ function ProviderCard({ p, accounts, busy, results, onConnect, onSync, onDisconn
               )}
               {a.lastError && a.missingPermissions.length === 0 && <p className="error-text integration-err">{a.lastError}</p>}
               {results[a.id] && <p className={results[a.id].ok ? "integration-meta" : "error-text integration-err"}>{results[a.id].message}</p>}
+              {a.provider === "outlook" && a.status === "CONNECTED" && (
+                <label className="ca-toggle" title="Emails to or from your contacts and buyers are filed on their records, where teammates who can open the record see them. Turn off to file emails only by hand.">
+                  <input type="checkbox" checked={a.autoLinkEmail} onChange={(e) => onAutoFile(a, e.target.checked)} />
+                  Auto-file emails with contacts and buyers on their records
+                </label>
+              )}
               <div className="integration-actions">
                 {a.status === "CONNECTED" ? (
                   <button className="small" disabled={busy === `sync:${a.id}` || a.syncStatus === "SYNCING"} onClick={() => onSync(a)}>
@@ -193,6 +209,7 @@ function ProviderCard({ p, accounts, busy, results, onConnect, onSync, onDisconn
                 ) : (
                   <button className="small primary" disabled={!p.configured || !p.allowed || busy === `connect:${p.key}`} onClick={onConnect}>Reconnect</button>
                 )}
+                {a.provider === "outlook" && a.status === "CONNECTED" && <button className="small" onClick={() => onSignatures(a)}>Signatures</button>}
                 <button className="small set-btn-danger-text" onClick={() => onDisconnect(a)}>Disconnect</button>
               </div>
             </li>

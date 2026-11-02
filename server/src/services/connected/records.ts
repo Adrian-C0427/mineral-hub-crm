@@ -71,3 +71,16 @@ export function refOf(row: { dealId: string | null; opportunityId: string | null
   if (row.buyerId) return { type: "buyer", id: row.buyerId };
   return null;
 }
+
+/** Display names for linked records (org-scoped; records the caller can't see are left unnamed). */
+export async function recordNames(req: AuthedRequest, refs: readonly (RecordRef | null)[]): Promise<Map<string, string>> {
+  const org = orgId(req);
+  const ids = (t: RecordType) => [...new Set(refs.filter((r): r is RecordRef => !!r && r.type === t).map((r) => r.id))];
+  const out = new Map<string, string>();
+  const can = (t: RecordType) => hasPermission(req, RECORD_VIEW_PERMISSION[t]);
+  if (can("deal") && ids("deal").length) for (const d of await prisma.deal.findMany({ where: { id: { in: ids("deal") }, organizationId: org }, select: { id: true, name: true } })) out.set(`deal:${d.id}`, d.name);
+  if (can("opportunity") && ids("opportunity").length) for (const o of await prisma.opportunity.findMany({ where: { id: { in: ids("opportunity") }, organizationId: org }, select: { id: true, name: true } })) out.set(`opportunity:${o.id}`, o.name);
+  if (can("contact") && ids("contact").length) for (const c of await prisma.contact.findMany({ where: { id: { in: ids("contact") }, organizationId: org }, select: { id: true, firstName: true, middleName: true, lastName: true, entityName: true } })) out.set(`contact:${c.id}`, contactName(c) || "Contact");
+  if (can("buyer") && ids("buyer").length) for (const b of await prisma.buyer.findMany({ where: { id: { in: ids("buyer") }, organizationId: org }, select: { id: true, name: true } })) out.set(`buyer:${b.id}`, b.name);
+  return out;
+}
