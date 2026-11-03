@@ -24,6 +24,10 @@ import {
 // Cap rows per ingest so a single file can't drive an unbounded parse/insert
 // pass (the char-level MAX_CSV_CHARS bound still applies to the raw body).
 export const MAX_INGEST_ROWS = 50_000;
+// Cap one grantor/grantee cell. Real county index cells run to a few hundred
+// characters; the party parser does per-character work on each cell, so an
+// oversized one is rejected rather than parsed.
+export const MAX_PARTY_CELL_CHARS = 4_000;
 const CHUNK = 500;
 
 export function parseCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
@@ -304,6 +308,10 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       const rowState = g.state;
       const rowCounty = g.county;
       if (!rowState || !rowCounty) { record(i, "REJECTED", "Missing county/state (assign one for this file)", data); continue; }
+      if (data.grantor.length > MAX_PARTY_CELL_CHARS || data.grantee.length > MAX_PARTY_CELL_CHARS) {
+        record(i, "REJECTED", `Grantor/grantee longer than ${MAX_PARTY_CELL_CHARS.toLocaleString()} characters`, data);
+        continue;
+      }
       const instrumentNumber = get(row, "instrumentNumber") || null;
       // Clean names, grouping keys, individual participants (strict split on
       // , ; /) and the conveyed interest ("ABC MINERALS LLC – 50%" → ABC
