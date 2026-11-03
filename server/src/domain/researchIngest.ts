@@ -18,7 +18,7 @@ import { HttpError } from "../middleware/errors.js";
 import { locationFields, normState, titleCounty } from "./researchGeo.js";
 import { gisSurveyLookup, surveysFor } from "../services/researchGeoFill.js";
 import {
-  classifyDocType, classifyPermitStatus, classifyTrajectory,
+  classifyDocType, classifyPermitStatus, classifyReviewedDocType, classifyTrajectory,
   documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, normField, PARTY_RULES_VERSION } from "./research.js";
 
 // Cap rows per ingest so a single file can't drive an unbounded parse/insert
@@ -95,6 +95,13 @@ export interface IngestArgs {
    * history — that list is reserved for uploads users made themselves.
    */
   automated?: boolean;
+  /**
+   * Deeds only: every row of the file was reviewed by a person as a mineral
+   * transfer, so general instrument types ("WARRANTY DEED", "ASSIGNMENT",
+   * "CONVEYANCE", …) import too (classifyReviewedDocType) instead of being
+   * rejected as possibly surface deals.
+   */
+  reviewedTransfers?: boolean;
 }
 
 export interface IngestSummary {
@@ -131,6 +138,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
   const {
     prisma, organizationId: org, createdByUserId, category, csv, mapping,
     filename, assignedState, assignedCounty, dryRun = false, automated = false, previewRows = 0,
+    reviewedTransfers = false,
   } = args;
   const { kind, source, docClass: wantClass } = resolveCategory(category);
   const fallbackState = assignedState ? normState(assignedState) : null;
@@ -283,7 +291,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         abstractId: get(row, "abstractId"), survey: get(row, "survey"),
         ...geoView(g),
       };
-      const cls = classifyDocType(docTypeRaw);
+      const cls = reviewedTransfers && wantClass === "TRANSACTION" ? classifyReviewedDocType(docTypeRaw) : classifyDocType(docTypeRaw);
       if (!cls) { record(i, "REJECTED", docTypeRaw ? `Not mineral-related: "${docTypeRaw}"` : "Missing document type", data); continue; }
       // Scope to the selected Data Type: Deeds keep transfers, Leases keep leases.
       if (wantClass && cls.docClass !== wantClass) {

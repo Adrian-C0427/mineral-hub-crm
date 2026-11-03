@@ -109,6 +109,30 @@ export function classifyDocType(raw: string): { docType: DocType; docClass: DocC
   return null;
 }
 
+/**
+ * Classify a row from a file a person has already reviewed row by row as
+ * mineral transfers. The general instrument types county indexes also use for
+ * surface deals ("WARRANTY DEED", "DEED", "ASSIGNMENT", "CONVEYANCE",
+ * "CORRECTION", "SPECIAL W/D") are accepted and filed under the closest
+ * transfer type; docTypeRaw keeps the type as recorded. Liens, plats and
+ * easements are still rejected, and leases still classify as leases.
+ */
+export function classifyReviewedDocType(raw: string): { docType: DocType; docClass: DocClass } | null {
+  const known = classifyDocType(raw);
+  if (known) return known;
+  const t = ` ${raw.toUpperCase().replace(/[^A-Z0-9&]+/g, " ").trim()} `;
+  if (!t.trim()) return null;
+  if (EXCLUDED.some((x) => t.includes(` ${x} `) || t.trim() === x)) return null;
+  if (reLease.test(t)) return null; // a surface/grazing lease is never a transfer
+  const transfer = (docType: DocType) => ({ docType, docClass: "TRANSACTION" as const });
+  if (t.includes("WARRANTY") || /\bW D\b/.test(t)) return transfer("WARRANTY_MINERAL_DEED"); // "SPECIAL W/D"
+  if (reQuit.test(t)) return transfer("QUITCLAIM_MINERAL_DEED");
+  if (reAssign.test(t)) return transfer("ASSIGNMENT");
+  if (t.includes("DEED")) return transfer("MINERAL_DEED");
+  if (reConvey.test(t) || /\bCONV\b/.test(t)) return transfer("MINERAL_CONVEYANCE");
+  return transfer("OTHER");
+}
+
 /** Map a raw permit/well status string to the lifecycle enum. */
 export function classifyPermitStatus(raw: string | null | undefined): PermitStatus {
   const t = (raw ?? "").toUpperCase();
