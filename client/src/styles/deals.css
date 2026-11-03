@@ -52,7 +52,10 @@
    cell holds a fixed one-line label, value and sub-line, so the strip's height
    is the same for every filter and the table never jumps under it. */
 .deals-page > .dl-kpis { margin: 0; }
-.dl-kpis .stat-cell { padding: 18px 22px; }
+/* Each figure sits in its own column, divided in the strip's border colour,
+   so a short figure ("50") and a long one ("$5,158.85 /NMA") still read as
+   evenly spaced. The -1px margins tuck the outer dividers under the border. */
+.dl-kpis .stat-cell { padding: 18px 22px; margin: -1px 0 0 -1px; box-shadow: inset 1px 0 0 var(--line), inset 0 1px 0 var(--line); }
 .dl-kpis .stat-label, .dl-kpis .stat-sub, .dl-kpis .stat-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .dl-kpis .stat-value { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; min-height: 29px; }
 .dl-kpi-unit { margin-left: 3px; font-size: 14px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
@@ -67,7 +70,7 @@
   .dl-kpi-unit { font-size: clamp(11px, 0.85vw, 14px); }
 }
 @media (min-width: 761px) and (max-width: 1599px) {
-  .dl-kpis .stat-cell { padding: 14px 14px; }
+  .dl-kpis .stat-cell { padding: 16px; }
 }
 
 /* Desktop list layout: the card always fills the window below the strip, so
