@@ -421,16 +421,27 @@ function splitAmpersand(part: string): string[] {
  * instrument, not who it is. Dropped from the name (the user's call: dropped,
  * not kept).
  */
-const ROLE_RE = /(?:^|[\s,;:\-–—]+)(?:AS\s+)?(?:GENERAL\s+PARTNER|GEN(?:ERAL)?\.?\s*PT(?:NR)?\.?|MANAGING\s+(?:MEMBER|PARTNER|GENERAL\s+PARTNER)|CO-?TRUSTEES?|SUCCESSOR\s+(?:CO-?)?TRUSTEES?|TRUSTEES?|TTEES?|INDEPENDENT\s+(?:CO-?)?EXECUT(?:OR|RIX)S?|EXECUT(?:OR|RIX)S?|ADMINISTRAT(?:OR|RIX)S?|ATTORNEY[\s-]+IN[\s-]+FACT|A\.?I\.?F\.?|AGENT|GUARDIAN|PARTNER|MEMBER|MANAGER|PRESIDENT|INDIVIDUALLY|INDIV\.?|P\.?O\.?A\.?|D\/?B\/?A)\.?\s*$/i;
+const ROLE_RE = /(?:^|[\s,;:\-–—]+)(?:AS\s+)?(?:GENERAL\s+PARTNER|GEN(?:ERAL)?\.?\s*PT(?:NR)?\.?|MANAGING\s+(?:MEMBER|PARTNER|GENERAL\s+PARTNER)|CO-?TRUSTEES?|SUCCESSOR\s+(?:CO-?)?TRUSTEES?|TRUSTEES?|TTEES?|INDEPENDENT\s+(?:CO-?)?EXECUT(?:OR|RIX)S?|EXECUT(?:OR|RIX)S?|ADMINISTRAT(?:OR|RIX)S?|EXTRX?|PERSONAL\s+REPRESENTATIVES?|REP|ATTORNEY[\s-]+IN[\s-]+FACT|ATTORNEY|A\.?I\.?F\.?|AGENT|GUARDIAN|PARTNER|MEMBER|MANAGER|PRESIDENT|INDIVIDUALLY|IN(?:DIV|IDV)\.?|P\.?O\.?A\.?|D\/?B\/?A)\.?\s*$/i;
 function stripRole(name: string): string {
   let t = name;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     const next = t.replace(ROLE_RE, "");
     if (next === t) break;
-    t = next;
+    // A chain of roles ("INDIV & TRUSTEE", "TRUSTEE AND EXECUTOR"): the joiner
+    // goes with the role after it, so the role before it comes off next.
+    t = next.replace(/(?:[\s,]*(?:&|\bAND\b))+\s*$/i, "");
   }
   return tidyPartyName(t);
 }
+
+/**
+ * A capacity clause a comma split off ("JOHN SMITH, INDIVIDUALLY AND AS
+ * EXECUTOR OF THE ESTATE OF MARY SMITH, DECEASED") says in what right the party
+ * before it signs. It is never a party of its own: it stays as that party's
+ * note. A marital description ("…, HUSBAND AND WIFE") is dropped like a role.
+ */
+const CAPACITY_RE = /^(?:INDIVIDUALLY\b|IN(?:DIV|IDV)\b|AS\s+(?:(?:SUCCESSOR|INDEPENDENT|CO-?)\s*)*(?:EXECUT|ADMINISTRAT|TRUSTEE|PERSONAL\s+REP|ATTORNEY|AGENT|GUARDIAN)|(?:SUCCESSOR\s+)?(?:INDEPENDENT\s+)?(?:CO-?)?(?:EXECUT(?:OR|RIX)|ADMINISTRAT(?:OR|RIX)|TRUSTEE)S?\s+OF\b|PERSONAL\s+REPRESENTATIVES?\s+OF\b|(?:BOTH\s+)?(?:DECEASED|DECD)\b\.?(?:\s+ESTATE(?:\s+OF)?)?\s*(?:[([]|$)|ESTATE\s+OF\s*(?:[([]|$))/i;
+const MARITAL_RE = /^(?:HUSBAND\s+(?:AND|&)\s+WIFE|WIFE\s+(?:AND|&)\s+HUSBAND|HIS\s+WIFE|HER\s+HUSBAND)\.?\s*$/i;
 
 /** Bracketed text that only restates the conveyed interest once the share itself is gone. */
 const INTEREST_REMNANT_WORDS = new Set(["OF", "THE", "GRANTOR", "GRANTORS", "GRANTOR'S", "GRANTEE", "GRANTEES", "INTEREST", "INTERESTS", "INT", "UNDIVIDED", "MI", "RI", "MINERAL", "MINERALS", "ROYALTY", "S", "AN", "A", "IN", "AND", "TO", "ALL"]);
@@ -538,6 +549,13 @@ export function parsePartyCell(raw: string | null | undefined): { parties: Parse
     const ex = cleanPart(part);
     if (ex.pct != null) hasInterest = true;
     const prev = out[out.length - 1];
+    if (prev && MARITAL_RE.test(part.trim())) continue;
+    if (prev && ex.name && CAPACITY_RE.test(part.trim())) {
+      const clause = extractInterest(part.trim()).name.trim();
+      prev.note = prev.note ? `${prev.note}, ${clause}` : clause;
+      if (prev.pct == null && ex.pct != null) { prev.pct = ex.pct; prev.text = ex.text; }
+      continue;
+    }
     if (prev && isSuffixOnly(ex.name)) {
       prev.name = `${prev.name}, ${ex.name}`;
       if (prev.pct == null && ex.pct != null) { prev.pct = ex.pct; prev.text = ex.text; }
@@ -546,6 +564,9 @@ export function parsePartyCell(raw: string | null | undefined): { parties: Parse
     }
     const norm = normalizeEntity(ex.name);
     if (!norm) {
+      // A part that was only roles ("…, TRUSTEE & EXECUTOR (LUKER FAMILY
+      // TRUST)") still annotates the party before it.
+      if (prev && ex.note) prev.note = prev.note ? `${prev.note}; ${ex.note}` : ex.note;
       if (ex.pct == null) continue;
       if (!prev) leading = { pct: ex.pct, text: ex.text };
       else if (prev.pct == null) { prev.pct = ex.pct; prev.text = ex.text; }
