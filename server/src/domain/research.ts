@@ -312,19 +312,40 @@ export const PARTY_RULES_VERSION = 6;
  * length, so a separator search sees only the top level. An opening bracket
  * that never closes masks nothing, and neither does a bracket holding several
  * shares — that is a list of parties ("ABC INC ET AL (85%/JOHN DOE 5%/…)").
+ *
+ * Linear in the length: deeply nested brackets in an uploaded cell must not
+ * stall the server. A share ("5%", "5 %") is counted at its "%" from prefix
+ * sums, and the masked spans are summed as a difference array.
  */
 function maskBrackets(s: string): string {
-  const chars = s.split("");
+  const n = s.length;
+  // shares[k] = how many "<digit><spaces>%" end before index k.
+  const shares = new Int32Array(n + 1);
+  let lastNonSpaceIsDigit = false;
+  for (let k = 0; k < n; k++) {
+    const ch = s[k];
+    const isShare = ch === "%" && lastNonSpaceIsDigit;
+    shares[k + 1] = shares[k] + (isShare ? 1 : 0);
+    if (!/\s/.test(ch)) lastNonSpaceIsDigit = ch >= "0" && ch <= "9";
+  }
+  const depth = new Int32Array(n + 1);
   const open: number[] = [];
-  for (let i = 0; i < s.length; i++) {
+  for (let i = 0; i < n; i++) {
     if (s[i] === "(" || s[i] === "[") open.push(i);
     else if ((s[i] === ")" || s[i] === "]") && open.length) {
       const from = open.pop()!;
-      if ((s.slice(from + 1, i).match(/\d\s*%/g) ?? []).length > 1) continue;
-      for (let j = from + 1; j < i; j++) chars[j] = "_";
+      if (shares[i] - shares[from + 1] > 1) continue;
+      depth[from + 1]++;
+      depth[i]--;
     }
   }
-  return chars.join("");
+  let out = "";
+  let run = 0;
+  for (let k = 0; k < n; k++) {
+    run += depth[k];
+    out += run > 0 ? "_" : s[k];
+  }
+  return out;
 }
 
 /** A closing bracket with no opener left behind by a split ("HELEN LOKEY 5%)"). */
