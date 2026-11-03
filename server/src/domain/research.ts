@@ -300,8 +300,12 @@ export interface ParsedParty {
  *       ordinal fraction ("1/3rd") and a fraction beside its percent
  *       ("(1/3) (33.3333%)") are shares; the same party named twice with a
  *       share each holds both; shares that round to 100% total 100%.
+ *   6 — a chain of roles comes off whole ("NAME INDIV & TRUSTEE", "TRUSTEE &
+ *       EXECUTOR"), not leaving "NAME INDIV &"; a capacity clause a comma split
+ *       off ("…, INDIVIDUALLY AND AS EXECUTOR OF THE ESTATE OF X", "…,
+ *       DECEASED") is the previous party's note, never a party.
  */
-export const PARTY_RULES_VERSION = 5;
+export const PARTY_RULES_VERSION = 6;
 
 /**
  * The text with everything inside balanced (…) / […] pairs masked, same
