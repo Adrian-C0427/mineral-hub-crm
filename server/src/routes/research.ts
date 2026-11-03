@@ -1907,6 +1907,9 @@ const commitSchema = z.object({
   // Fallback State/County the user assigns when the file has no such columns.
   assignedState: z.string().trim().min(1).optional(),
   assignedCounty: z.string().trim().min(1).optional(),
+  // Deeds: the user reviewed every row as a mineral transfer, so general
+  // instrument types (Warranty Deed, Assignment, …) import too.
+  reviewedTransfers: z.boolean().optional(),
 });
 
 researchRouter.post(
@@ -1914,13 +1917,13 @@ researchRouter.post(
   requirePermission("manageResearchData"),
   ingestLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { category, csv, mapping, filename, assignedState, assignedCounty } = commitSchema.parse(req.body);
+    const { category, csv, mapping, filename, assignedState, assignedCounty, reviewedTransfers } = commitSchema.parse(req.body);
     // All ingest logic (dedup, classification, geography normalization, the
     // per-import audit trail) lives in the shared core so the headless CLI
     // importer runs it identically. The route only supplies request context.
     const summary = await ingestResearchCsv({
       prisma, organizationId: orgId(req), createdByUserId: req.user!.id,
-      category, csv, mapping, filename, assignedState, assignedCounty,
+      category, csv, mapping, filename, assignedState, assignedCounty, reviewedTransfers,
     });
     res.json(summary);
   }),
@@ -1934,10 +1937,10 @@ researchRouter.post(
   requirePermission("manageResearchData"),
   ingestLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { category, csv, mapping, assignedState, assignedCounty } = commitSchema.parse(req.body);
+    const { category, csv, mapping, assignedState, assignedCounty, reviewedTransfers } = commitSchema.parse(req.body);
     const summary = await ingestResearchCsv({
       prisma, organizationId: orgId(req), createdByUserId: req.user!.id,
-      category, csv, mapping, assignedState, assignedCounty, dryRun: true, previewRows: 8,
+      category, csv, mapping, assignedState, assignedCounty, reviewedTransfers, dryRun: true, previewRows: 8,
     });
     res.json(summary);
   }),

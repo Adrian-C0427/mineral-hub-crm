@@ -72,6 +72,33 @@ describe("share notation", () => {
   });
 });
 
+describe("roles and capacities are never parties", () => {
+  const names = (cell: string) => parsePartyCell(cell).parties.map((p) => [p.name, p.note ?? null]);
+  it("a chain of roles comes off whole", () => {
+    expect(names("BUDNER KEITH HOWARD INDIV & TRUSTEE")).toEqual([["BUDNER KEITH HOWARD", null]]);
+    expect(names("SCLATER KENNETH CAMERON III INDIV EXECUTOR & TRUSTEE")).toEqual([["SCLATER KENNETH CAMERON III", null]]);
+    expect(names("MURRAY ELIZABETH LYNN INDIV EXTR & TTEE")).toEqual([["MURRAY ELIZABETH LYNN", null]]);
+    expect(names("LEHMAN ROD KEVIN INDIVIDUALLY AND AS INDEPENDENT EXECUTOR")).toEqual([["LEHMAN ROD KEVIN", null]]);
+    expect(names("JOHN F WILINSKY, INDIVIDUALLY AND AS TRUSTEE; WILINSKY MARY ALICE TRUST"))
+      .toEqual([["JOHN F WILINSKY", null], ["WILINSKY MARY ALICE TRUST", null]]);
+    expect(shares("HUFF MIMI D INDIV & TRUSTEE (10.17%); LA GRONE CHARLES W BYPASS TRUST (29.66%)"))
+      .toEqual([["HUFF MIMI D", 10.17], ["LA GRONE CHARLES W BYPASS TRUST", 29.66]]);
+  });
+  it("what a role-only part names stays as a note on the party before it", () => {
+    expect(names("DANIEL TRICE LUKER, TRUSTEE & EXECUTOR (LUKER FAMILY TRUST)")).toEqual([["DANIEL TRICE LUKER", "LUKER FAMILY TRUST"]]);
+    expect(shares("JOHN SMITH, AS TRUSTEE (50%)")).toEqual([["JOHN SMITH", 50]]);
+  });
+  it("a capacity clause after a comma is the party's note, not another party", () => {
+    expect(names("CLINT WADE SUTTON, INDIVIDUALLY AND AS INDEPENDENT EXECUTOR OF THE ESTATE OF C R SUTTON, DECEASED"))
+      .toEqual([["CLINT WADE SUTTON", "INDIVIDUALLY AND AS INDEPENDENT EXECUTOR OF THE ESTATE OF C R SUTTON, DECEASED"]]);
+    expect(names("CAROL ANN DAWLEY, INDEPENDENT ADMINISTRATOR OF THE ESTATE OF ANNIE VENIA BRITT"))
+      .toEqual([["CAROL ANN DAWLEY", "INDEPENDENT ADMINISTRATOR OF THE ESTATE OF ANNIE VENIA BRITT"]]);
+    expect(names("RAY CLYDE IRBY JR, DECEASED, ESTATE OF (MARK ALAN RAY, EXECUTOR)"))
+      .toEqual([["RAY CLYDE IRBY JR", "DECEASED, ESTATE OF (MARK ALAN RAY, EXECUTOR)"]]);
+    expect(names("KENNETH W MADDOX & LORITA Y MADDOX, HUSBAND AND WIFE")).toEqual([["KENNETH W MADDOX & LORITA Y MADDOX", null]]);
+  });
+});
+
 describe("shares are never lost", () => {
   it("'&' between grantees that each have a share splits them", () => {
     const pf = grantee("SAND COYOTE HOLDINGS LLC (35%) & CO3 INVESTMENTS LLC (35%) & JAMES RYAN CAIN (17.5%) & MULTIPLIED CAPITAL INC (12.5%)");

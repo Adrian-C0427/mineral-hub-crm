@@ -73,6 +73,8 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [assignState, setAssignState] = useState("");
   const [assignCounty, setAssignCounty] = useState("");
+  // Deeds: every row was reviewed as a mineral transfer — general deed types import too.
+  const [reviewed, setReviewed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<CommitResp | null>(null);
@@ -90,7 +92,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
 
   function reset() {
     setCsv(null); setFilename(""); setAnalysis(null); setMapping({}); setResult(null); setError("");
-    setAssignState(""); setAssignCounty("");
+    setAssignState(""); setAssignCounty(""); setReviewed(false);
   }
 
   async function onFile(f: File) {
@@ -118,6 +120,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         category, csv, mapping, filename: filename || undefined,
         assignedState: assignState.trim() || undefined,
         assignedCounty: assignCounty.trim() || undefined,
+        reviewedTransfers: (category === "deeds" && reviewed) || undefined,
       });
       setResult(r);
       setAnalysis(null);
@@ -150,13 +153,14 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         category, csv, mapping,
         assignedState: assignState.trim() || undefined,
         assignedCounty: assignCounty.trim() || undefined,
+        reviewedTransfers: (category === "deeds" && reviewed) || undefined,
       })
         .then((p) => { if (seq === previewSeq.current) setPreview(p); })
         .catch((e) => { if (seq === previewSeq.current) { setPreview(null); setPreviewErr(e instanceof Error ? e.message : "Could not preview this file"); } });
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysis, csv, category, mappingKey, assignState, assignCounty, requiredMissing.length]);
+  }, [analysis, csv, category, mappingKey, assignState, assignCounty, reviewed, requiredMissing.length]);
   const allRunsSelected = runs.length > 0 && runs.every((r) => selectedRuns.has(r.id));
   const someRunsSelected = selectedRuns.size > 0 && !allRunsSelected;
 
@@ -237,6 +241,17 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                   )}
                 </div>
               </div>
+            )}
+
+            {category === "deeds" && (
+              <label className="rs-reviewed">
+                <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} />
+                <span>
+                  Every row in this file has been reviewed as a mineral transfer
+                  <small>Also imports general deed types — Warranty Deed, Deed, Assignment, Conveyance, Correction — that are
+                    otherwise skipped as possible surface deals. Each keeps its type as recorded.</small>
+                </span>
+              </label>
             )}
 
             {previewErr && <Banner kind="error">{previewErr}</Banner>}
