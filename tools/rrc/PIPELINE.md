@@ -240,3 +240,29 @@ scheduled producer with no production reported for 12+ months.
 - Manual position errors found and corrected:
   - daf802 `DA-FIELD-ACRES` is at 48–55, not 46.
   - Every 02-segment position is manual − 3 (0-based).
+
+## Unattended refresh cycle (every two weeks)
+
+The refresh now runs on its own twice a month (the 4th and the 18th, when RRC's
+monthly files are out) as a local scheduled task, `rrc-refresh-cycle`, on the
+owner's Mac. RRC's transfer portal only serves files to a browser session, so
+the task clicks the downloads in Chrome; everything after that is one script,
+`server/src/scripts/rrcRefreshCycle.ts`, run from a dedicated clone at
+`~/rrc-refresh/repo` (kept outside iCloud-synced folders; `~/rrc-refresh/.env`
+holds only `DATABASE_URL`, read-only use).
+
+```
+npx tsx src/scripts/rrcRefreshCycle.ts plan                      # dated data dir + download checklist
+npx tsx src/scripts/rrcRefreshCycle.ts check --data-dir <dir>    # every file present and intact?
+npx tsx src/scripts/rrcRefreshCycle.ts run   --data-dir <dir> --merge
+```
+
+`run` resets the clone to `origin/main`, builds the bundles, stops if nothing
+changed (and deletes the raw files), otherwise compares the new statuses with
+the live database, runs the refresh tests, commits on `rrc-refresh/<date>`,
+opens the PR, merges it when every gate is green, waits for the deploy to load
+the new bundle versions, verifies the counts, then writes a removal log to
+`~/rrc-refresh/logs/` and deletes the raw files. Gates: no county may lose more
+than 10 % of its wells, at most 5 % retired, at most 30 % status changes, tests
+green — a failed gate leaves the PR open for a person and keeps the raw files.
+The county scope lives in `server/src/ingest/refresh/scope.ts`.

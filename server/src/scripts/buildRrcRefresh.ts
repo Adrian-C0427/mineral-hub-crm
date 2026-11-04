@@ -22,15 +22,10 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { buildRefresh, type RefreshReport } from "../ingest/refresh/build.js";
-import { ABSTRACTS_DATASET, PRODUCTION_DATASET, WELLS_DATASET, type CountyScope, type WellRow } from "../ingest/refresh/dataset.js";
+import { ABSTRACTS_DATASET, PRODUCTION_DATASET, WELLS_DATASET, type WellRow } from "../ingest/refresh/dataset.js";
+import { REFRESH_COUNTIES as COUNTIES, REFRESH_LEDGERS } from "../ingest/refresh/scope.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const COUNTIES: CountyScope[] = [
-  { code: "073", name: "Cherokee" },
-  { code: "161", name: "Freestone" },
-  { code: "203", name: "Harrison" },
-  { code: "289", name: "Leon" },
-];
 
 function arg(name: string, fallback?: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -197,8 +192,8 @@ async function main(): Promise<void> {
     files: {
       ewa, permits: "daf802.txt.gz", uic: "uif700a.txt.gz", dbf900: "dbf900.ebc.gz", pdq: "PDQ_DSV.zip",
       // Oil & Gas Ledgers covering the counties' districts: gas 4–6, oil 3 and 5–6.
-      gasLedgers: ["gsf002l.ebc.gz"].filter((f) => fs.existsSync(path.join(dataDir, f))),
-      oilLedgers: ["olf003l.ebc.gz", "olf005l.ebc.gz"].filter((f) => fs.existsSync(path.join(dataDir, f))),
+      gasLedgers: REFRESH_LEDGERS.gas.filter((f) => fs.existsSync(path.join(dataDir, f))),
+      oilLedgers: REFRESH_LEDGERS.oil.filter((f) => fs.existsSync(path.join(dataDir, f))),
     },
     pdqTsv: pdqTsvIdx >= 0 ? process.argv[pdqTsvIdx + 1] : undefined,
     asOfDates: { dbf900: arg("dbf900-date"), uic: arg("uic-date"), ledgers: arg("ledger-date", "") || undefined },
