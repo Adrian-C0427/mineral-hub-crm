@@ -5,6 +5,7 @@ import {
   Mail, MapPin, MessageSquare, Palette, Pencil, Phone, Pin, Plus, Search, Send, StickyNote, Trash2, X,
 } from "lucide-react";
 import { api } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList, OverflowMenu, BackLink, StageBadge } from "../components/ui";
 import { useAbstractLabels } from "../components/AbstractPicker";
@@ -144,7 +145,7 @@ export function ContactDetail() {
   useEffect(() => {
     load();
     api.get<ContactRow[]>("/contacts").then(setAll).catch(() => {});
-    api.get<UserLite[]>("/users").then(setUsers).catch(() => {});
+    fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {});
   }, [load]);
 
   const patch = async (body: Record<string, unknown>) => {

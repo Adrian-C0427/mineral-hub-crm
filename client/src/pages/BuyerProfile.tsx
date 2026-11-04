@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, Modal, ChipList, BackLink } from "../components/ui";
 import { StatStrip, Tag } from "../components/kit";
@@ -117,7 +118,7 @@ export function BuyerProfile() {
   const [activeTab, setActiveTab] = useState<SectionTab>("overview");
 
   function load() { api.get<BuyerProfileData>(`/buyers/${id}`).then(setB); }
-  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers); }, [id]);
+  useEffect(() => { load(); fetchQuery<UserLite[]>("/users").then(setUsers); }, [id]);
 
   // Registered while a section is dirty: navigation anywhere raises the
   // standard Save / Discard / Cancel dialog. Section switches go through

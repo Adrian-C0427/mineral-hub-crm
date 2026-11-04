@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronDown, Mail, MessageSquare, Pencil, Phone, Plus, StickyNote, Users, Zap } from "lucide-react";
 import { api, ApiError } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, BackLink, ConfirmDelete, OverflowMenu, EmptyState, Modal, showToast } from "../components/ui";
 import { Segmented, StatStrip, Tag, type StatCell } from "../components/kit";
@@ -75,7 +76,7 @@ export function OpportunityRecord({ opp, onChange: setOpp, reload: load }: { opp
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState<OppTab>("general");
   const [users, setUsers] = useState<UserLite[]>([]);
-  useEffect(() => { api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  useEffect(() => { fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
 
   // The record's pipeline comes from the app's list. When that list doesn't
   // have it (made in another tab, or the list is stale), reload the list once

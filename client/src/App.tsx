@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { Spinner, ToastHost } from "./components/ui";
 import { UnsavedChangesGuard } from "./lib/unsaved";
+import { prefetchQuery } from "./lib/queryCache";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -16,7 +17,7 @@ import { Deals } from "./pages/Deals";
 import { DealDetail } from "./pages/DealDetail";
 import { Buyers } from "./pages/Buyers";
 import { BuyerProfile } from "./pages/BuyerProfile";
-import { Suspense, lazy, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { SettingsGeneral } from "./pages/SettingsGeneral";
 import { Organization } from "./pages/Organization";
 import { SettingsPortal } from "./pages/SettingsPortal";
@@ -73,9 +74,37 @@ function ForcePasswordChange() {
   );
 }
 
+/**
+ * Warm the code for the pages the sidebar links to once the app is idle, so
+ * the first visit to Contacts, Calendar, Research… renders at once instead of
+ * showing "Loading…" while its chunk downloads — and so a redeploy mid-session
+ * cannot leave a chunk this tab still needs missing (the usual cause of the
+ * "Something went wrong" flash). MapLibre (Map) is left out: 300 KB most
+ * sessions never open.
+ */
+function prefetchRoutes() {
+  const loaders = [
+    () => import("./pages/Contacts"), () => import("./pages/ContactDetail"), () => import("./pages/Opportunity"),
+    () => import("./pages/Calendar"), () => import("./pages/Inbox"), () => import("./pages/Files"),
+    () => import("./pages/Research"), () => import("./pages/Reports"), () => import("./pages/Valuation"),
+    () => import("./pages/MineralAssets"), () => import("./pages/MineralAssetDetail"), () => import("./pages/Expenses"),
+    () => import("./pages/Integrations"), () => import("./pages/PortalAdmin"),
+  ];
+  const run = () => { for (const load of loaders) void load().catch(() => {}); };
+  const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+  if (w.requestIdleCallback) w.requestIdleCallback(run, { timeout: 4000 }); else window.setTimeout(run, 1500);
+}
+
 export function App() {
   const { user, loading } = useAuth();
   const { pathname } = useLocation();
+  // Once signed in, fetch the rest of the app's code in the background and
+  // warm the lookups every page shares.
+  useEffect(() => {
+    if (!user || user.mustChangePassword) return;
+    prefetchRoutes();
+    prefetchQuery("/users");
+  }, [user]);
 
   // Buyer Offering Portal is public: reachable signed-in or out, no CRM chrome.
   if (pathname.startsWith("/portal/") || pathname.startsWith("/offer/")) {

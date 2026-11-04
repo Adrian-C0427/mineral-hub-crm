@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { fetchQuery, useQuery } from "../lib/queryCache";
 import { PriorityBadge, StageBadge, Spinner, SearchInput, showToast } from "../components/ui";
 import { royaltyLabel, royaltyValue } from "../lib/royalty";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -73,7 +74,9 @@ function inScope(d: DealSummary, scope: Scope): boolean {
 
 export function Deals({ scope = "all" }: { scope?: Scope }) {
   const { can, user } = useAuth();
-  const [deals, setDeals] = useState<DealSummary[] | null>(null);
+  // Cached per session: a revisit renders the last list at once and refreshes behind it.
+  const dealsQ = useQuery<DealSummary[]>("/deals?visibility=all");
+  const deals = dealsQ.data ?? null;
   // Visibility (Active / Hidden / All) is the user's saved choice (profile),
   // remembered for the tab too so Back from a deal keeps it without a refetch
   // of /me. The list is loaded once (hidden deals included) and the view is
@@ -95,8 +98,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const [stageKey, setStageKey] = useListState(`deals:${scope}:stage`, "");
   const closeNew = () => { setShowNew(false); if (params.get("new")) setParams({}, { replace: true }); };
 
-  function load() { api.get<DealSummary[]>("/deals?visibility=all").then(setDeals); }
-  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  const load = () => { void dealsQ.reload(); };
+  useEffect(() => { fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
   function setVisibility(v: DealsVisibility) {
     if (v === visibility) return;
     setVisibilityState(v);

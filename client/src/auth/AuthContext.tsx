@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { api, ApiError, setAuthToken, getAuthToken, setUnauthorizedHandler } from "../api/client";
 import { purgeLegacyBrandingCache } from "../lib/branding";
 import { clearLogoCache } from "../lib/logoTheme";
+import { clearQueryCache } from "../lib/queryCache";
 
 export type OrgRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 
@@ -117,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(null);
       setUser(null);
       clearLogoCache();
+      clearQueryCache();
       resetLocation();
     });
     return () => setUnauthorizedHandler(null);
@@ -148,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthToken(null);
     setUser(null);
     clearLogoCache(); // a signed-out tab keeps no org's processed artwork
+    clearQueryCache(); // nor any of its records
     resetLocation(); // back to the marketing site, not a stale in-app URL
   };
 

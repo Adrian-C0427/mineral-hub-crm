@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, canSeeTeamId, invalidateSessionUser, type AuthedRequest } from "../middleware/auth.js";
 import { demoReadOnly } from "../middleware/demo.js";
 import {
   generateInviteCode, rotateTeamId, revokeInvitesKnownTo, assertCanGrantRole, canGrantRole, inviteExpiryFrom,
@@ -386,6 +386,7 @@ orgRouter.patch(
       data,
       select: { id: true, name: true, email: true, phone: true, orgRole: true, status: true, lastActiveAt: true },
     });
+    invalidateSessionUser(target.id);
     res.json(updated);
   }),
 );
@@ -421,6 +422,7 @@ orgRouter.delete(
         where: { id: member.id },
         data: { organizationId: null, orgRole: null, sessionEpoch: { increment: 1 } },
       });
+      invalidateSessionUser(member.id);
       const invitesRevoked = await revokeInvitesKnownTo(orgId(req), member, tx);
       return { teamId: await rotateTeamId(orgId(req), tx), invitesRevoked };
     });
@@ -526,6 +528,8 @@ orgRouter.post(
       prisma.user.update({ where: { id: target.id }, data: { orgRole: "OWNER" } }),
       prisma.user.update({ where: { id: req.user!.id }, data: { orgRole: "ADMIN" } }),
     ]);
+    invalidateSessionUser(target.id);
+    invalidateSessionUser(req.user!.id);
     res.json({ ok: true });
   }),
 );

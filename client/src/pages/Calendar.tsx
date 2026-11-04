@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { Modal, showToast } from "../components/ui";
 import { Segmented } from "../components/kit";
 import { Select, type SelectOption } from "../components/Select";
@@ -239,7 +240,7 @@ export function Calendar() {
     if (peopleAsked.current) return;
     peopleAsked.current = true;
     const list = (path: string, allowed: boolean) => (allowed ? api.get<Named[]>(path).catch(() => [] as Named[]) : Promise.resolve([] as Named[]));
-    Promise.all([list("/deals", can("viewDeals")), list("/buyers", can("viewBuyers")), api.get<UserRef[]>("/users").catch(() => [] as UserRef[])])
+    Promise.all([list("/deals", can("viewDeals")), list("/buyers", can("viewBuyers")), fetchQuery<UserRef[]>("/users").catch(() => [] as UserRef[])])
       .then(([deals, buyers, users]) => setPeople({
         deals: deals.map((x) => ({ id: x.id, name: x.name })), buyers: buyers.map((x) => ({ id: x.id, name: x.name })), users,
       }));

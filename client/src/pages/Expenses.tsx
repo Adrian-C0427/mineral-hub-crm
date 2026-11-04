@@ -5,6 +5,7 @@ import {
   PieChart, Pie, Cell,
 } from "recharts";
 import { api, ApiError } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDelete, ConfirmDialog } from "../components/ui";
 import { StatStrip, Avatar, Tag, FormSection } from "../components/kit";
@@ -95,7 +96,7 @@ export function Expenses() {
       api.get<Expense[]>(`/expenses${query ? `?${query}` : ""}`),
       api.get<Dashboard>(`/expenses/dashboard${query ? `?${query}` : ""}`),
       api.get<Category[]>("/expenses/categories"),
-      api.get<UserLite[]>("/users"),
+      fetchQuery<UserLite[]>("/users"),
     ])
       .then(([ex, d, cats, us]) => { setExpenses(ex); setDash(d); setCategories(cats); setUsers(us); })
       .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load expenses"))

@@ -30,6 +30,51 @@ export interface AuthedRequest extends Request {
 // Refresh lastActiveAt at most this often, to avoid a write on every request.
 const ACTIVITY_THROTTLE_MS = 5 * 60 * 1000;
 
+// The session user row, kept briefly so the lookup that runs on EVERY request
+// is one database round trip per user every few seconds instead of per
+// request. The database is far from the API, so that trip is the biggest
+// fixed cost of a small endpoint. A short TTL bounds how long a revoked
+// session (password change bumps sessionEpoch, a disabled account, a role
+// change) keeps working; the routes that make those changes also evict the
+// entry at once (invalidateSessionUser).
+const SESSION_USER_TTL_MS = 10_000;
+type SessionUserRow = NonNullable<Awaited<ReturnType<typeof loadSessionUser>>>;
+const sessionUserCache = new Map<string, { at: number; user: SessionUserRow | null }>();
+
+function loadSessionUser(userId: string) {
+  // Explicit select: fetch only what req.user needs. This keeps secrets
+  // (passwordHash, totpSecret) out of every request AND means a column added
+  // to the schema but not yet pushed to the DB (e.g. themePreference) can't
+  // break auth on the whole app.
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true, role: true, name: true, email: true, firstName: true, lastName: true,
+      phone: true, organizationId: true, orgRole: true, mustChangePassword: true,
+      status: true, lastActiveAt: true, sessionEpoch: true,
+      organization: { select: { isDemo: true, referenceOrgId: true } },
+    },
+  });
+}
+
+/** Forget the cached session row for a user (after a password, status, role or
+ *  organization change) so the next request re-reads it. */
+export function invalidateSessionUser(userId: string): void {
+  sessionUserCache.delete(userId);
+}
+
+async function sessionUser(userId: string): Promise<SessionUserRow | null> {
+  const hit = sessionUserCache.get(userId);
+  if (hit && Date.now() - hit.at < SESSION_USER_TTL_MS) return hit.user;
+  // Retry only transient Neon reconnect blips (P1001/P1017): attachUser runs
+  // on every request, so an unretried connection hiccup here becomes an
+  // unhandled rejection that fails the whole request (Sentry MINERAL-HUB-API-7).
+  const user = await withDbRetry(() => loadSessionUser(userId));
+  sessionUserCache.set(userId, { at: Date.now(), user });
+  if (sessionUserCache.size > 5000) sessionUserCache.delete(sessionUserCache.keys().next().value!);
+  return user;
+}
+
 /**
  * Populates req.user from the session token if valid. Does not block.
  * Also resolves the caller's effective permissions and (throttled) updates
@@ -44,24 +89,7 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
   if (token) {
     const session = verifySession(token);
     if (session) {
-      // Explicit select: fetch only what req.user needs. This keeps secrets
-      // (passwordHash, totpSecret) out of every request AND means a column added
-      // to the schema but not yet pushed to the DB (e.g. themePreference) can't
-      // break auth on the whole app.
-      // Retry only transient Neon reconnect blips (P1001/P1017): attachUser runs
-      // on every request, so an unretried connection hiccup here becomes an
-      // unhandled rejection that fails the whole request (Sentry MINERAL-HUB-API-7).
-      const user = await withDbRetry(() =>
-        prisma.user.findUnique({
-          where: { id: session.userId },
-          select: {
-            id: true, role: true, name: true, email: true, firstName: true, lastName: true,
-            phone: true, organizationId: true, orgRole: true, mustChangePassword: true,
-            status: true, lastActiveAt: true, sessionEpoch: true,
-            organization: { select: { isDemo: true, referenceOrgId: true } },
-          },
-        }),
-      );
+      const user = await sessionUser(session.userId);
       // A password change bumps sessionEpoch, stranding every token issued
       // before it. Without this, "I changed my password" would not evict an
       // attacker holding a stolen token — the one remediation users reach for.
@@ -92,11 +120,13 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
           referenceOrgId: user.organization?.isDemo === true ? user.organization.referenceOrgId ?? null : null,
         };
 
-        // Throttled last-activity update (fire-and-forget).
+        // Throttled last-activity update (fire-and-forget). The cached row is
+        // stamped too, so the write really is once per throttle window.
         const stale = !user.lastActiveAt || Date.now() - user.lastActiveAt.getTime() > ACTIVITY_THROTTLE_MS;
         if (stale) {
+          user.lastActiveAt = new Date();
           prisma.user
-            .update({ where: { id: user.id }, data: { lastActiveAt: new Date() } })
+            .update({ where: { id: user.id }, data: { lastActiveAt: user.lastActiveAt } })
             .catch(() => {});
         }
       }

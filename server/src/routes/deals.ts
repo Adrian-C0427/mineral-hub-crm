@@ -188,7 +188,10 @@ dealsRouter.get(
     const revenueInclude = rt === "OWNED_ASSET"
       ? { revenueEntries: { select: { month: true, amount: true, kind: true } } }
       : {};
+    // One SQL statement (relationJoins) instead of one per relation: the list
+    // used to be nine sequential round trips to the database.
     const deals = await prisma.deal.findMany({
+      relationLoadStrategy: "join",
       where,
       include: {
         ...dealInclude, offers: { select: { id: true, amount: true, status: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } }, ...revenueInclude,
@@ -488,6 +491,7 @@ dealsRouter.get(
  */
 export async function dealDetail(organizationId: string, id: string, viewContacts: boolean, researchOrgIds: string[] = [organizationId]) {
   const deal = await prisma.deal.findFirst({
+    relationLoadStrategy: "join",
     where: { id, organizationId },
     include: {
       ...dealInclude,

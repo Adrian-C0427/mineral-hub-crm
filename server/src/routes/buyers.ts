@@ -91,6 +91,7 @@ buyersRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const [buyers, rates] = await Promise.all([
       prisma.buyer.findMany({
+        relationLoadStrategy: "join",
         where: { organizationId: orgId(req) },
         include: { buyBox: true },
         orderBy: { companyName: "asc" },
@@ -137,6 +138,7 @@ buyersRouter.get(
   requirePermission("viewBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const b = await prisma.buyer.findFirst({
+      relationLoadStrategy: "join",
       where: { id: req.params.id, organizationId: orgId(req) },
       include: {
         buyBox: true,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { Spinner, showToast, ChipList } from "../components/ui";
 import { Select } from "../components/Select";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
@@ -314,7 +315,7 @@ export function Pipeline() {
   // lib/boardSync.ts for the ordering rules that stop cards jumping back).
   const board = useBoardSync<DealSummary>({
     scope: "deals",
-    fetchRows: () => api.get<DealSummary[]>("/deals?recordType=OPPORTUNITY"),
+    fetchRows: () => fetchQuery<DealSummary[]>("/deals?recordType=OPPORTUNITY", { force: true }),
     enabled: !isOpportunityPipeline(selected),
     paused: drag != null,
     onFetchError: (_err, initial) => { if (initial) showToast("Could not load the pipeline.", "error"); },

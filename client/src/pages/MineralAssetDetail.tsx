@@ -5,6 +5,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine, LabelList,
 } from "recharts";
 import { api } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDialog, ConfirmDelete, BackLink, CtPill, OverflowMenu, showToast } from "../components/ui";
@@ -85,7 +86,7 @@ export function MineralAssetDetail() {
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
   useEffect(() => {
     api.get<AssetDetail>(`/deals/${id}`).then((d) => { setAsset(d); setTab(d.assetMode === "SELL" ? "sell" : "hold"); });
-    api.get<UserLite[]>("/users").then(setUsers).catch(() => {});
+    fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {});
   }, [id]);
   // Initialize the tab from the asset's mode once, on first load.
   useEffect(() => { if (asset && matches === null) loadMatches(); }, [asset, matches, loadMatches]);
