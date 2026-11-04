@@ -1,0 +1,490 @@
+fid,api8,county,status,flag,note
+435670,07330065,Cherokee,Other/Unknown,needs-investigation,"Completed 1972, no longer on RRC's proration schedule, and no plugging report is on file."
+436182,07330638,Cherokee,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-02."
+438264,07301104,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+439051,28930517,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+439077,28900481,Leon,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+439246,28930661,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+439337,28930883,Leon,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-04."
+439339,28930889,Leon,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-04."
+439397,28930602,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+439410,28931128,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+439527,28930829,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+439638,28900198,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+439813,28930114,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+443266,07330854,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-12, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+443268,07330862,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-06, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+443503,07330802,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+443522,07330856,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-12, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+443535,07330887,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+443581,07330957,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-06, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+443584,07330960,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-08, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+445684,07300552,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+446362,07330054,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+446363,07330028,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+446508,07330422,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+446749,28930344,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+446766,28930428,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 101 ft; the map uses RRC's NAD83 point.
+447683,28931297,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+447689,28930368,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-08, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+447707,28930315,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+447743,16131244,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+447766,16130748,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2020-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+447774,16130596,Freestone,Other/Unknown,needs-investigation,"Completed 1980, no longer on RRC's proration schedule, and no plugging report is on file."
+447901,28930398,Leon,Other/Unknown,needs-investigation,"Completed 1981, no longer on RRC's proration schedule, and no plugging report is on file."
+447909,28930383,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+450383,16131390,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-06, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+450388,16131409,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2020-11, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+450398,16131438,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-05, but the well has reported production since then, most recently 2026-05. RRC keeps a wellbore inactive until production is sustained."
+450458,16131565,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+450508,16131631,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-08, but the well has reported production since then, most recently 2026-02. RRC keeps a wellbore inactive until production is sustained."
+450549,16131293,Freestone,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2020-07."
+450626,16120034,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+450632,16130547,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 588 ft; the map uses RRC's NAD83 point.
+450659,16130647,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-07, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+450701,16131342,Freestone,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-02."
+450709,16131354,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+450720,16131447,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-10, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+450829,16100558,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+450838,16100567,Freestone,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-06."
+450838,16100567,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+450997,16130727,Freestone,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+451515,16130141,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+451528,16130390,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2019-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+451535,16130483,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+451547,16130434,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-02, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+451622,16131110,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-04, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+451654,16131441,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+451696,16130006,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+451697,16131001,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+451749,16100770,Freestone,Other/Unknown,needs-investigation,"Completed 1978, no longer on RRC's proration schedule, and no plugging report is on file."
+451755,16130786,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+451760,16131397,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+452235,16100013,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+452390,16180100,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+452598,16100142,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+452747,16130528,Freestone,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+453741,16100370,Freestone,Other/Unknown,needs-investigation,"Completed 1965, no longer on RRC's proration schedule, and no plugging report is on file."
+453760,16131349,Freestone,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+453774,16130629,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-08, but the well has reported production since then, most recently 2026-05. RRC keeps a wellbore inactive until production is sustained."
+453893,16130448,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-06, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+453904,16131445,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+454319,16100294,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 96 ft; the map uses RRC's NAD83 point.
+574022,20331805,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+574033,20331823,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+574360,20330882,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 83 ft; the map uses RRC's NAD83 point.
+574474,20331938,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 83 ft; the map uses RRC's NAD83 point.
+574519,20332083,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+574538,20332115,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+574554,20332164,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 83 ft; the map uses RRC's NAD83 point.
+574836,20331646,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+574874,20331933,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+574876,20331951,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-01, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+574888,20332210,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+575977,20331399,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+576462,20301740,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+576484,20301714,Harrison,Other/Unknown,needs-investigation,"Completed 1955, no longer on RRC's proration schedule, and no plugging report is on file."
+576493,20320103,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+576625,20330631,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+576837,20301830,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+576851,20380107,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+576900,20331814,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+576905,20331756,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+576913,20331848,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-07, but the well has reported production since then, most recently 2026-01. RRC keeps a wellbore inactive until production is sustained."
+576921,20331903,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+576925,20331921,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+576959,20332148,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+576967,20332183,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577108,20301270,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577116,20301269,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577133,20301299,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577270,20301177,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577279,20301167,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577291,20301195,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577301,20330216,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577303,20301163,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577307,20301144,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577309,20301145,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577311,20301149,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577312,20301152,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577316,20301141,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577334,20301096,Harrison,Plugged,missing-bottom-hole,Horizontal/directional well with no bottom-hole location in RRC's layers.
+577357,20301037,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577358,20301029,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577360,20301025,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577375,20301127,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577377,20301009,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577379,20301017,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577382,20301125,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577389,20301117,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577396,20301002,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577397,20301004,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577399,20301007,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577400,20301011,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577403,20301119,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577415,20301015,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577417,20301013,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577430,20330169,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+577457,,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577461,20331330,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+577471,20300982,Harrison,Other/Unknown,needs-investigation,"Completed 1952, no longer on RRC's proration schedule, and no plugging report is on file."
+577540,20301675,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577610,20320095,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577611,20320098,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577612,20320099,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577613,20320097,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577617,20320086,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577621,20320088,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577622,20320093,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577624,20320091,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577626,20320089,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577628,20320076,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577641,20331394,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577689,20301535,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577698,20301537,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577724,20301515,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577726,20301510,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577727,20301509,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577782,20301458,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577783,20301459,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577784,20301462,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577787,20301469,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577788,20301465,Harrison,Disposal,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577789,20301470,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577799,20330921,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577825,20301132,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577836,20300986,Harrison,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-06."
+577841,20301043,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577844,20301034,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577853,,Harrison,Other/Unknown,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577859,20301453,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577860,20301452,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577861,20301451,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577863,20301430,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577864,20301447,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577865,20301448,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577867,20301427,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577868,20301446,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577869,20301445,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+577871,20301434,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577872,20301425,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577876,20301435,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577877,20301437,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577878,20301444,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577889,20331539,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+577891,20301641,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577899,20301422,Harrison,Other/Unknown,needs-investigation,"Completed 1940, no longer on RRC's proration schedule, and no plugging report is on file."
+577903,20331196,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+577908,20301385,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577929,20301164,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+577968,20301413,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+578029,20331804,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+578038,20331829,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+578050,20331820,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+578054,20331935,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+578073,20332140,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+578074,20332138,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-05, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+578075,20332137,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-07, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+578076,20332160,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-05, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+578081,20332185,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+578109,20332278,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+578111,20332284,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+578112,20332288,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+578113,20332293,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+578119,20332298,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+578120,20332303,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+578121,20332302,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+578123,20332307,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+602373,20302149,Harrison,Other/Unknown,needs-investigation,"Completed 1955, no longer on RRC's proration schedule, and no plugging report is on file."
+602600,20330794,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 83 ft; the map uses RRC's NAD83 point.
+602651,20330670,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2020-09, but the well has reported production since then, most recently 2026-04. RRC keeps a wellbore inactive until production is sustained."
+602667,20330782,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-04, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+602843,20332314,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2019-07, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+602900,20330238,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+602946,20300031,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+603216,20330012,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+603244,20331506,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+603258,20331395,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-10, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+603285,20331344,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+614778,,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614828,20331619,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614837,20300679,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614838,20300697,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614863,,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614864,20300663,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614878,20300543,Harrison,Other/Unknown,needs-investigation,"Completed 1957, no longer on RRC's proration schedule, and no plugging report is on file."
+614881,20300546,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 78 ft; the map uses RRC's NAD83 point.
+614899,20300623,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614900,20300625,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614901,20300621,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614950,,Harrison,Other/Unknown,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+614978,20300654,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+615051,20380448,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+615072,20300859,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615073,20300858,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+615117,20300775,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615153,20330845,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615202,20300852,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615220,20380446,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+615222,20300865,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615229,20300773,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615246,20380292,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+615249,20300624,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+615257,20300534,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+615272,20331763,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+615301,20331942,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615303,20331981,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+615320,20332282,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+615321,20332285,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+615322,20332286,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+615338,20332463,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615342,20332502,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+615462,20300467,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+615633,20332545,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 78 ft; the map uses RRC's NAD83 point.
+615684,20330896,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 78 ft; the map uses RRC's NAD83 point.
+615692,20330879,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 78 ft; the map uses RRC's NAD83 point.
+615704,20331778,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 78 ft; the map uses RRC's NAD83 point.
+616001,20300219,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+616103,20330030,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+616111,20330904,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+616134,20332457,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+616314,20330491,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+616345,20330095,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+616435,20300298,Harrison,Other/Unknown,needs-investigation,"Completed 1963, no longer on RRC's proration schedule, and no plugging report is on file."
+616446,20330824,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+620538,07330456,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+620542,07330381,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1050231,16131696,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2018-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1051045,16131710,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-08, but the well has reported production since then, most recently 2026-02. RRC keeps a wellbore inactive until production is sustained."
+1051755,16131717,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2026-02. RRC keeps a wellbore inactive until production is sustained."
+1054208,16131753,Freestone,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+1058070,16131809,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-06, but the well has reported production since then, most recently 2026-02. RRC keeps a wellbore inactive until production is sustained."
+1059726,16131843,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-10, but the well has reported production since then, most recently 2026-04. RRC keeps a wellbore inactive until production is sustained."
+1059731,16131847,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2020-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1059732,16131845,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2008-05, but the well has reported production since then, most recently 2026-02. RRC keeps a wellbore inactive until production is sustained."
+1065581,16131984,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-07, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1065652,16131986,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1066996,20332671,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+1067006,20332672,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1069412,16132058,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1071548,16132101,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 116 ft; the map uses RRC's NAD83 point.
+1071609,16132109,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-01, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1072835,07331008,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2012-06, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1074123,20332704,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1074334,16132168,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-07, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+1074910,20332712,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1075077,16132192,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-06, but the well has reported production since then, most recently 2026-05. RRC keeps a wellbore inactive until production is sustained."
+1079123,20332724,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+1081522,16132351,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-03, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+1083382,16132395,Freestone,Producing,no-recent-production,"On RRC's schedule as producing, but no production is reported for its lease."
+1083969,16132414,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-06, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1085126,16132437,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2018-04, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1086209,28931363,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+1087229,07331049,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+1087614,20332765,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-03, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1088318,20332771,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2015-09, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1090028,16132566,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-05, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1090486,07331056,Cherokee,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 92 ft; the map uses RRC's NAD83 point.
+1091458,16132614,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-01, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1092237,20332797,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-01, but the well has reported production since then, most recently 2026-05. RRC keeps a wellbore inactive until production is sustained."
+1095408,16132716,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1096303,16132737,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-02, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1097691,20332855,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1098064,16132779,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-07, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1099509,20332877,Harrison,Injection,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1101387,07331089,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 91 ft; the map uses RRC's NAD83 point.
+1102032,20332897,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1102808,16132912,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2022-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1103725,28931403,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+1107145,20332950,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 84 ft; the map uses RRC's NAD83 point.
+1110421,20332992,Harrison,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-05."
+1110869,20332997,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2022-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1112569,16133107,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-02, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1113586,07331114,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1113834,20333046,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-05, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1113836,20333048,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-03, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1114204,20333054,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1115742,20333080,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-05, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1116439,20333093,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1117787,20333110,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1117788,20333111,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1119493,20333140,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1119561,20333144,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-05, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1120034,20333148,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2020-04, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1121674,20333180,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1124463,20333239,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-11, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1124598,16133326,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-03, but the well has reported production since then, most recently 2026-05. RRC keeps a wellbore inactive until production is sustained."
+1125559,28931505,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-05, but the well has reported production since then, most recently 2026-02. RRC keeps a wellbore inactive until production is sustained."
+1126031,29331722,Freestone,Producing,no-recent-production,"On RRC's schedule as producing, but no production is reported for its lease."
+1127076,16133374,Freestone,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1127120,20333292,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-02, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1129588,20333322,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+1129635,20333323,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2015-08, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1130067,28930591,Leon,Plugged,missing-bottom-hole,Horizontal/directional well with no bottom-hole location in RRC's layers.
+1130202,20333342,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2019-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1130535,16133434,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1130669,20333348,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-01, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1130670,20333349,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-05, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1130679,20333352,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-03, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1130739,28931536,Leon,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1131704,20333369,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-09, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1131769,07331153,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-11, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+1133776,20333395,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1133906,28931553,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+1135218,07331160,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 92 ft; the map uses RRC's NAD83 point.
+1135877,20333424,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1136671,20333445,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1137767,28931570,Leon,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1138778,28931574,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1139132,16133581,Freestone,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1139574,20333477,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2019-06, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1141718,20333554,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-05, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1142507,28931593,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1142596,20333583,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1142969,16133672,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2015-06, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1143474,20333591,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1143475,20333592,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1143932,07331185,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 94 ft; the map uses RRC's NAD83 point.
+1144888,20333652,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-01, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1144889,20333653,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-10, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1145196,20333663,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 96 ft; the map uses RRC's NAD83 point.
+1146071,07331201,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+1147466,20333701,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+1147560,16133754,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2022-08, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1148006,20333723,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1149364,16133789,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-09, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1149817,20333764,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-06, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1153668,28931653,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1153770,20333871,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2022-06, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1155129,16133222,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1155759,16133878,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2013-06, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1156378,28931660,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1157617,07331251,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-12, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+1157932,20333973,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-11, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1158462,20333992,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2020-02, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1158631,07331257,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+1159527,20334011,Harrison,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-05."
+1160172,28931680,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-05, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1161053,16133964,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2019-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1161235,07331271,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-04, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1161437,20334056,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1161493,20334062,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2019-06, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1161542,16133974,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-07, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1161976,20334078,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2017-08, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1163675,20334128,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-01, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1163677,20334129,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-04, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1164429,20334143,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+1165061,20334156,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1166334,20334179,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 78 ft; the map uses RRC's NAD83 point.
+1167268,20334202,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1167270,20334204,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2019-06, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1167384,20334208,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-01, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1167924,28931716,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-03, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1167941,20334219,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1168306,20334228,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2015-06, but the well has reported production since then, most recently 2026-02. RRC keeps a wellbore inactive until production is sustained."
+1171228,20334303,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1172114,07331336,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-10, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+1172500,20334332,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1172546,20334340,Harrison,Producing,no-recent-production,"On RRC's schedule as producing, but no production is reported for its lease."
+1173171,20334358,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+1173275,07331345,Cherokee,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-10, but the well has reported production since then, most recently 2026-03. RRC keeps a wellbore inactive until production is sustained."
+1175110,28931735,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-03, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1176631,20334445,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2025-09. RRC keeps a wellbore inactive until production is sustained."
+1177175,20334459,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-02, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1177927,20334496,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-11, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1178282,07331363,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 94 ft; the map uses RRC's NAD83 point.
+1178661,16134164,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-06, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1179406,20334531,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1182143,20334584,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-07, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1184052,20334617,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 84 ft; the map uses RRC's NAD83 point.
+1185031,20334634,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2018-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1185510,16134275,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-02, but the well has reported production since then, most recently 2025-10. RRC keeps a wellbore inactive until production is sustained."
+1186041,20334648,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-02, but the well has reported production since then, most recently 2026-04. RRC keeps a wellbore inactive until production is sustained."
+1187074,20334670,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-06, but the well has reported production since then, most recently 2026-07. RRC keeps a wellbore inactive until production is sustained."
+1187753,20334684,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1187839,20334686,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1187864,20334688,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-08, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1189351,20334730,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2016-12, but the well has reported production since then, most recently 2025-12. RRC keeps a wellbore inactive until production is sustained."
+1189656,20334736,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1192285,28931798,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2024-05, but the well has reported production since then, most recently 2026-05. RRC keeps a wellbore inactive until production is sustained."
+1192567,20334779,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1194880,20334827,Harrison,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1195478,07331449,Cherokee,Disposal,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+1196224,28931820,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-12, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1198195,28931831,Leon,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 113 ft; the map uses RRC's NAD83 point.
+1199363,28931839,Leon,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1202236,28931846,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2022-07, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1202404,28931847,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2022-07, but the well has reported production since then, most recently 2025-11. RRC keeps a wellbore inactive until production is sustained."
+1206283,16134524,Freestone,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1206355,16134527,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-07, but the well has reported production since then, most recently 2026-06. RRC keeps a wellbore inactive until production is sustained."
+1209560,28931871,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+1210678,28931874,Leon,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2021-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1213414,16134637,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-05, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1214844,28931894,Leon,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-06."
+1216548,20301460,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1216549,20301461,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1216550,20301464,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1216551,20301463,Harrison,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+1216552,20301466,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1216602,20301041,Harrison,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1216868,16134669,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1219764,16134688,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-03, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1220301,20335036,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2026-05, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1230066,16134735,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1236543,28931970,Leon,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1239084,16134763,Freestone,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2023-09, but the well has reported production since then, most recently 2026-08. RRC keeps a wellbore inactive until production is sustained."
+1244133,20335055,Harrison,Plugged,missing-bottom-hole,Horizontal/directional well with no bottom-hole location in RRC's layers.
+1249989,28932003,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 97 ft; the map uses RRC's NAD83 point.
+1250279,28932005,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 97 ft; the map uses RRC's NAD83 point.
+1254959,28932012,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1260694,20335148,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+1262605,28932062,Leon,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1262935,20335153,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2022-07, but the well has reported production since then, most recently 2026-01. RRC keeps a wellbore inactive until production is sustained."
+1263674,28932072,Leon,Other/Unknown,needs-investigation,"Completed 2013, no longer on RRC's proration schedule, and no plugging report is on file."
+1266815,28932082,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1270978,28932092,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1278717,28932104,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+1291601,07331513,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1305575,28932154,Leon,Producing,no-recent-production,"On RRC's schedule as producing, but its lease last reported production in 2025-08."
+1310159,07331533,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1312084,28932159,Leon,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+1314401,16134855,Freestone,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+1318055,07331546,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 90 ft; the map uses RRC's NAD83 point.
+1318681,28932161,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1319493,28932160,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
+1320062,20335261,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 83 ft; the map uses RRC's NAD83 point.
+1320139,28931213,Leon,Plugged,missing-bottom-hole,Horizontal/directional well with no bottom-hole location in RRC's layers.
+1322832,20335264,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 83 ft; the map uses RRC's NAD83 point.
+1323666,07331556,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 94 ft; the map uses RRC's NAD83 point.
+1326167,20335270,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 79 ft; the map uses RRC's NAD83 point.
+1326865,07331560,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 90 ft; the map uses RRC's NAD83 point.
+1330476,20335273,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1331095,07331561,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 90 ft; the map uses RRC's NAD83 point.
+1336204,20335278,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 78 ft; the map uses RRC's NAD83 point.
+1338101,20335280,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 83 ft; the map uses RRC's NAD83 point.
+1340729,07331567,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 90 ft; the map uses RRC's NAD83 point.
+1342606,20302236,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1343260,07331569,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 90 ft; the map uses RRC's NAD83 point.
+1343432,20335286,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1346442,07331571,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 91 ft; the map uses RRC's NAD83 point.
+1346887,28931896,Leon,Shut-In,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1349758,07331573,Cherokee,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 90 ft; the map uses RRC's NAD83 point.
+1351753,20335304,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 81 ft; the map uses RRC's NAD83 point.
+1354761,28932169,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1356614,07331575,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1357110,20335311,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1357578,28900519,Leon,Other/Unknown,needs-investigation,On RRC's schedule with an unrecognized well type (blank).
+1366246,20335336,Harrison,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 80 ft; the map uses RRC's NAD83 point.
+1368366,28932173,Leon,Producing,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 99 ft; the map uses RRC's NAD83 point.
+1368535,20335341,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-11, but the well has reported production since then, most recently 2026-01. RRC keeps a wellbore inactive until production is sustained."
+1372351,20331122,Harrison,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 82 ft; the map uses RRC's NAD83 point.
+1397412,07331580,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1403360,07331582,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1405682,16134862,Freestone,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1428446,20335560,Harrison,Shut-In,needs-investigation,"RRC's wellbore record shows it shut in since 2025-12, but the well has reported production since then, most recently 2026-01. RRC keeps a wellbore inactive until production is sustained."
+1435775,07331590,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1454119,07331594,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
+1461433,20335705,Harrison,Producing,no-recent-production,"On RRC's schedule as producing, but no production is reported for its lease."
+1472995,20335762,Harrison,Producing,no-recent-production,"On RRC's schedule as producing, but no production is reported for its lease."
+1473000,20335763,Harrison,Producing,no-recent-production,"On RRC's schedule as producing, but no production is reported for its lease."
+1479267,07331598,Cherokee,Drilling,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 159 ft; the map uses RRC's NAD83 point.
