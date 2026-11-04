@@ -252,10 +252,16 @@ the task clicks the downloads in Chrome; everything after that is one script,
 holds only `DATABASE_URL`, read-only use).
 
 ```
-npx tsx src/scripts/rrcRefreshCycle.ts plan                      # dated data dir + download checklist
-npx tsx src/scripts/rrcRefreshCycle.ts check --data-dir <dir>    # every file present and intact?
-npx tsx src/scripts/rrcRefreshCycle.ts run   --data-dir <dir> --merge
+~/rrc-refresh/cycle.sh plan                      # dated data dir + download checklist
+~/rrc-refresh/cycle.sh check --data-dir <dir>    # every file present and intact?
+~/rrc-refresh/cycle.sh run   --data-dir <dir> --merge
 ```
+
+`cycle.sh` is a small launcher kept outside the repo: it brings the clone up to
+`origin/main` (fetch, reset, `npm install`, `prisma generate`) and only then
+starts `server/src/scripts/rrcRefreshCycle.ts`, so a run always executes the
+script as it is on main. (The script's own reset happens after it has been
+loaded; the first scheduled run executed a stale copy that way.)
 
 `run` resets the clone to `origin/main`, builds the bundles, stops if nothing
 changed (and deletes the raw files), otherwise compares the new statuses with
