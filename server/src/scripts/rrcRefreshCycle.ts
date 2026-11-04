@@ -95,7 +95,18 @@ function gzipDate(file: string): string {
   return new Date(t * 1000).toISOString().slice(0, 10);
 }
 
-const sha = (file: string) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex").slice(0, 16);
+/**
+ * Hash of what a bundle would change in the database: its rows, without the
+ * build time, the version, the source snapshot dates or the report summary.
+ * RRC re-exports its GIS layers twice a week and a rebuild always carries a
+ * new build time, so comparing whole files would deploy "changes" that move
+ * no well, abstract or production row.
+ */
+function materialHash(bundle: string): string {
+  const o = JSON.parse(zlib.gunzipSync(fs.readFileSync(bundle)).toString("utf8")) as Record<string, unknown>;
+  for (const k of ["builtAt", "version", "sources", "source", "summary"]) delete o[k];
+  return crypto.createHash("sha256").update(JSON.stringify(o)).digest("hex").slice(0, 16);
+}
 const human = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(0)} KB`;
 
 function expectedFiles(dataDir: string): { name: string; minBytes: number; folder: string }[] {
@@ -205,7 +216,7 @@ async function run(): Promise<void> {
   note(`main at ${head}`);
 
   // 2. Build.
-  const before = Object.fromEntries([WELLS_DATASET.file, ABSTRACTS_DATASET.file, PRODUCTION_DATASET.file].map((f) => [f, fs.existsSync(path.join(BUNDLE_DIR, f)) ? sha(path.join(BUNDLE_DIR, f)) : ""]));
+  const before = Object.fromEntries([WELLS_DATASET.file, ABSTRACTS_DATASET.file, PRODUCTION_DATASET.file].map((f) => [f, fs.existsSync(path.join(BUNDLE_DIR, f)) ? materialHash(path.join(BUNDLE_DIR, f)) : ""]));
   const dates = {
     dbf900: gzipDate(path.join(dataDir, "dbf900.ebc.gz")),
     uic: gzipDate(path.join(dataDir, "uif700a.txt.gz")),
@@ -220,10 +231,10 @@ async function run(): Promise<void> {
   note(`build finished (log ${buildLog})`);
 
   // 3. Anything new?
-  const after = Object.fromEntries(Object.keys(before).map((f) => [f, sha(path.join(BUNDLE_DIR, f))]));
+  const after = Object.fromEntries(Object.keys(before).map((f) => [f, materialHash(path.join(BUNDLE_DIR, f))]));
   const changed = Object.keys(before).filter((f) => before[f] !== after[f]);
   if (!changed.length) {
-    note("bundles identical to main — RRC's data has not changed since the last refresh");
+    note("bundles carry the same wells, abstracts and production as main — RRC's data has not changed since the last refresh (only snapshot dates / build time differ)");
     git("checkout", "--", ".");
     git("clean", "-fdq");
     const removal = removeRawFiles(dataDir, date, "No change in RRC's data since the last refresh; nothing to deploy.");
