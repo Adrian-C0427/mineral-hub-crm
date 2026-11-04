@@ -1616,7 +1616,7 @@ export function MapView() {
                 <div className="dd-grid mc-kv">
                   <KV k="Status" v={selected.boreStatus} /><KV k="Bottom hole" v={selected.bhSource === "rrc-lateral-end" ? "End of RRC's lateral line" : "RRC bottom-hole record"} />
                 </div>
-                <p className="mc-fp-note">This wellbore's bottom hole is in a refreshed county, but its surface location is in a county outside Leon, Freestone and Cherokee, so its full well record isn't loaded.</p>
+                <p className="mc-fp-note">This wellbore's bottom hole is in a refreshed county, but its surface location is in a county outside Leon, Freestone, Cherokee and Harrison, so its full well record isn't loaded.</p>
               </>
             ) : selected.kind === "hotspot" ? (
               <>

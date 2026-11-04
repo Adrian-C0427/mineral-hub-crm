@@ -28,6 +28,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const COUNTIES: CountyScope[] = [
   { code: "073", name: "Cherokee" },
   { code: "161", name: "Freestone" },
+  { code: "203", name: "Harrison" },
   { code: "289", name: "Leon" },
 ];
 

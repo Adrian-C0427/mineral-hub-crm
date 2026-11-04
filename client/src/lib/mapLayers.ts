@@ -11,7 +11,7 @@ import { LEGACY_STATUS, STATUS_COLORS } from "./wellStatus";
  * an hour keyed by full URL, so a new value makes every client abandon its
  * stale tiles immediately; the server ignores the query param (its own LRU
  * clears on the deploy that ships the bump). */
-export const TILE_DATA_VERSION = "2026-10-18";
+export const TILE_DATA_VERSION = "2026-11-04";
 
 /** Cadastral vector tiles from PostGIS (/api/gis/tiles). Absolute URL required
  * by MapLibre; falls back to the page origin in dev (Vite proxies /api). */

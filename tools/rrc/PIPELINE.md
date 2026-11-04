@@ -177,7 +177,8 @@ Increment 3 = Railway cron + failure watchdog.
 ## 2026-10 refresh: bundled, loaded on deploy
 
 The production database isn't reachable from the build machine, so the
-Leon / Freestone / Cherokee refresh ships as **bundles in the repo**
+county refresh (Cherokee, Freestone, Harrison since 2026-11, Leon) ships as
+**bundles in the repo**
 (`server/data/rrc/*.json.gz`). The API loads them at boot through the same
 versioned, advisory-locked, single-transaction loader as the Louisiana data
 (`services/rrcRefresh.ts` on top of `services/gisRegions.loadVersionedDataset`).
@@ -194,7 +195,7 @@ Counts land in `rrc.refresh_log`; file names and snapshot dates in `rrc.source_s
 ### Rebuilding (next month)
 
 1. Download into `~/rrc-data/<yyyy-mm>/` (never under Desktop/Documents): `well{fips}.zip` +
-   `surv{fips}.zip` per county, `OG_WELLBORE_EWA_Report_<date>.csv`, `daf802.txt.gz`
+   `surv{fips}.zip` per county (the `COUNTIES` list in `scripts/buildRrcRefresh.ts`), `OG_WELLBORE_EWA_Report_<date>.csv`, `daf802.txt.gz`
    (NOT the frozen `daf802.txt`), `dbf900.ebc.gz` (NOT the frozen `dbf900.ebc`),
    `uif700a.txt.gz`, `PDQ_DSV.zip`, and the Oil & Gas Ledgers `gsf002l.ebc.gz` (gas,
    districts 4–6) + `olf003l.ebc.gz` / `olf005l.ebc.gz` (oil, districts 3 and 5–6).
