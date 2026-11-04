@@ -81,6 +81,23 @@ const loginLimiter = rateLimit({
   message: { error: "Too many login attempts. Try again later." },
 });
 
+/**
+ * Per-user ceiling for the routes that verify a signed-in caller's CURRENT
+ * password (PATCH /me, /change-password, /2fa/setup). loginLimiter never sees
+ * them: with a borrowed session, the account's password could be ground at
+ * bcrypt speed, then changed (evicting the owner) or the email swapped. Only
+ * failed requests count, so a typo never locks a person out of their profile.
+ */
+const passwordCheckLimiter = rateLimit({
+  windowMs: LOGIN_RATE_LIMIT.WINDOW_MS,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many incorrect password attempts. Try again later." },
+});
+
 // One-click demo sign-in: prospects share the demo login, so the cap is per
 // IP and generous enough for a demo meeting but not for scripted abuse.
 const demoLoginLimiter = rateLimit({
@@ -128,23 +145,37 @@ function storedTotpStep(stored: string | null, code: string): number | null {
  * code space. Counted across every path that checks a second factor. In
  * memory: the API runs as one instance; a restart only resets the window.
  */
-const secondFactorFailures = new Map<string, { n: number; resetAt: number }>();
-
-function secondFactorLocked(userId: string, now = Date.now()): boolean {
-  const f = secondFactorFailures.get(userId);
-  if (f && f.resetAt <= now) secondFactorFailures.delete(userId);
-  return (secondFactorFailures.get(userId)?.n ?? 0) >= LOGIN_RATE_LIMIT.MAX_ATTEMPTS;
+function failureCounter() {
+  const failures = new Map<string, { n: number; resetAt: number }>();
+  return {
+    locked(key: string, now = Date.now()): boolean {
+      const f = failures.get(key);
+      if (f && f.resetAt <= now) failures.delete(key);
+      return (failures.get(key)?.n ?? 0) >= LOGIN_RATE_LIMIT.MAX_ATTEMPTS;
+    },
+    record(key: string, now = Date.now()): void {
+      const f = failures.get(key);
+      if (!f || f.resetAt <= now) failures.set(key, { n: 1, resetAt: now + LOGIN_RATE_LIMIT.WINDOW_MS });
+      else f.n++;
+      // Bounded: drop expired entries once the map grows.
+      if (failures.size > 10_000) {
+        for (const [k, v] of failures) if (v.resetAt <= now) failures.delete(k);
+      }
+    },
+    clear(key: string): void { failures.delete(key); },
+  };
 }
+const secondFactorFailures = failureCounter();
+const secondFactorLocked = (userId: string, now = Date.now()): boolean => secondFactorFailures.locked(userId, now);
+const recordSecondFactorFailure = (userId: string, now = Date.now()): void => secondFactorFailures.record(userId, now);
 
-function recordSecondFactorFailure(userId: string, now = Date.now()): void {
-  const f = secondFactorFailures.get(userId);
-  if (!f || f.resetAt <= now) secondFactorFailures.set(userId, { n: 1, resetAt: now + LOGIN_RATE_LIMIT.WINDOW_MS });
-  else f.n++;
-  // Bounded: drop expired entries once the map grows.
-  if (secondFactorFailures.size > 10_000) {
-    for (const [k, v] of secondFactorFailures) if (v.resetAt <= now) secondFactorFailures.delete(k);
-  }
-}
+/**
+ * The same per-ACCOUNT ceiling on failed PASSWORD attempts. loginLimiter is
+ * per IP: a spray from many addresses got MAX_ATTEMPTS guesses per address and
+ * the account itself was never counted — the second factor was, the first was
+ * not. Locked, the reply is the wrong-password one; a sign-in clears it.
+ */
+const passwordFailures = failureCounter();
 
 /**
  * Verify a submitted 2FA value against the user's TOTP secret or recovery codes.
@@ -175,7 +206,7 @@ async function verifySecondFactor(user: { id: string; totpSecret: string | null;
       ok = removed === 1;
     }
   }
-  if (ok) secondFactorFailures.delete(user.id);
+  if (ok) secondFactorFailures.clear(user.id);
   else recordSecondFactorFailure(user.id);
   return ok;
 }
@@ -202,11 +233,20 @@ authRouter.post(
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
-    const ok = await verifyPassword(password, user.passwordHash);
-    if (!ok) {
+    // Locked after MAX_ATTEMPTS wrong passwords in the window, from any
+    // address: the reply is the wrong-password one, and costs a hash like it.
+    if (passwordFailures.locked(user.id)) {
+      await dummyVerifyPassword(password);
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
+    const ok = await verifyPassword(password, user.passwordHash);
+    if (!ok) {
+      passwordFailures.record(user.id);
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+    passwordFailures.clear(user.id);
 
     // Second factor step-up: password is correct, but 2FA is on.
     if (user.totpEnabled) {
@@ -567,6 +607,7 @@ authRouter.patch(
   "/me",
   requireAuth,
   forbidDemo(),
+  passwordCheckLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = accountSchema.parse(req.body);
     const email = data.email.toLowerCase();
@@ -619,6 +660,7 @@ authRouter.post(
   "/change-password",
   requireAuth,
   forbidDemo(),
+  passwordCheckLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
@@ -781,13 +823,22 @@ authRouter.get(
 
 // Begin enrollment: generate a secret and return the provisioning URI. Not yet
 // active — the user must confirm a code via /2fa/enable.
+//
+// The CURRENT password is required, as for PATCH /me. A session alone used to
+// be enough: whoever held a borrowed token could enrol THEIR authenticator on
+// the account and keep the recovery codes, and no password reset removed it
+// (users.ts reset-password now clears the second factor too).
 authRouter.post(
   "/2fa/setup",
   requireAuth,
   forbidDemo(),
+  passwordCheckLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { email: true, totpEnabled: true } });
-    if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled. Disable it first to re-enroll.");
+    const { password } = z.object({ password: z.string().min(1, "Your current password is required to set up two-factor authentication") }).parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { email: true, totpEnabled: true, passwordHash: true } });
+    if (!user) throw new HttpError(404, "Account not found");
+    if (!(await verifyPassword(password, user.passwordHash))) throw new HttpError(403, "Your current password is incorrect.");
+    if (user.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled. Disable it first to re-enroll.");
     const secret = generateSecret();
     await prisma.user.update({ where: { id: req.user!.id }, data: { totpSecret: sealTotpSecret(secret) } });
     res.json({ secret, otpauthUri: otpauthUri(secret, user!.email, "Mineral Hub") });

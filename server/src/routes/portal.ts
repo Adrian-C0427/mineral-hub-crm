@@ -667,9 +667,15 @@ portalRouter.post(
       body.message || null,
     ].filter(Boolean).join("\n\n");
 
+    // PENDING_REVIEW, not ACTIVE: an unauthenticated submission used to become
+    // the deal's best offer at once — Profit Est., Buyer Purchase Price, High
+    // Offer and the buyer's close rate all read it — so anyone with the public
+    // link could post a $1T "offer" into every figure the team acts on. It is
+    // listed on the deal and counted nowhere until a person confirms it
+    // (domain/metrics.ts countedOffers; PATCH /offers/:id → Active).
     await prisma.offer.create({
       data: {
-        dealId: deal.id, buyerId, amount: body.amount, status: "ACTIVE",
+        dealId: deal.id, buyerId, amount: body.amount, status: "PENDING_REVIEW",
         conditions: body.conditions || null, expirationDate,
         notes: submitted,
       },
@@ -679,7 +685,8 @@ portalRouter.post(
     const title = `Portal offer: ${body.companyName} on "${deal.name}"`;
     const bodyText = `$${Math.round(body.amount).toLocaleString("en-US")} offer from ${body.contactName}${body.conditions ? ` · terms: ${body.conditions.slice(0, 80)}` : ""}`
       // An email match is not proof of identity, so say so where it's read.
-      + (existing ? " · UNVERIFIED — matched an existing buyer by email only; confirm before acting" : "");
+      + (existing ? " · UNVERIFIED — matched an existing buyer by email only; confirm before acting" : "")
+      + " · pending review: set it Active on the deal to count it";
     await prisma.notification.create({
       data: {
         organizationId: deal.organizationId, userId: deal.relationshipOwnerId ?? null,

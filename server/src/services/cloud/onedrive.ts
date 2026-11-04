@@ -64,12 +64,18 @@ const sortItems = (items: CloudItem[]) =>
  * endpoints (Graph may phrase them as /me/drive/… or /drives/<id>/…) — never
  * anywhere else the token could reach.
  */
-function ownLink(link: string, kind: "page" | "delta"): string {
-  const ok = /^https:\/\/graph\.microsoft\.com\/v1\.0\/(me\/drive|drives\/[A-Za-z0-9!_.-]+)\//.test(link)
-    && (kind === "page" || /\/root\/delta\b/.test(new URL(link).pathname));
+export function ownDriveLink(link: string, kind: "page" | "delta"): string {
+  // Checked on the PARSED url, which is what gets fetched: a raw-string prefix
+  // test let `/me/drive/../../me/contacts` through as `/me/contacts`.
+  let u: URL;
+  try { u = new URL(link); } catch { throw new ProviderError("Invalid page cursor.", "invalid"); }
+  const ok = u.origin === "https://graph.microsoft.com"
+    && /^\/v1\.0\/(me\/drive|drives\/[A-Za-z0-9!_.-]+)\//.test(u.pathname)
+    && (kind === "page" || /\/root\/delta\b/.test(u.pathname));
   if (!ok) throw new ProviderError("Invalid page cursor.", "invalid");
-  return link;
+  return u.href;
 }
+const ownLink = ownDriveLink;
 
 const itemUrl = (id: string | null) => (id ? `${G}/me/drive/items/${encodeURIComponent(safeItemId(id))}` : `${G}/me/drive/root`);
 

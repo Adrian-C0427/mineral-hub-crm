@@ -1337,8 +1337,9 @@ const importCommitSchema = z.object({
   csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large"),
   mapping: z.record(z.string(), z.string()),
   state: z.string().min(2).max(2).transform((s) => s.toUpperCase()),
-  county: z.string().optional(),
-  filename: z.string().optional(),
+  // Copied onto every well the import creates (up to the row cap) and the run: bounded.
+  county: z.string().max(100).optional(),
+  filename: z.string().max(300).optional(),
 });
 
 const CHUNK = 500;

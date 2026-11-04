@@ -65,6 +65,7 @@ export function planDeadlineEvents(
 
 async function graphRequest(token: string, method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
   const res = await fetch(`${GRAPH}${path}`, {
+    signal: AbortSignal.timeout(20_000),
     method,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),

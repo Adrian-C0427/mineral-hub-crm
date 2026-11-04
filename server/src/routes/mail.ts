@@ -399,11 +399,18 @@ async function documentAttachments(req: AuthedRequest, ids: string[]): Promise<O
     where: { id: { in: ids }, OR: [{ deal: { organizationId: orgId(req) } }, { opportunity: { organizationId: orgId(req) } }, { buyer: { organizationId: orgId(req) } }] },
   });
   if (files.length !== new Set(ids).size) throw new HttpError(404, "A document to attach wasn't found.");
+  // The per-email cap is checked on the stored sizes BEFORE anything is read:
+  // 20 documents of 25 MB each were buffered in full (500 MB) before the send
+  // path rejected the total. Each read then gets what is left of the budget.
+  const planned = files.reduce((n, f) => n + f.sizeBytes, 0);
+  if (planned > MAX_ATTACHMENTS_BYTES) throw new HttpError(413, `Attachments are limited to ${MAX_ATTACHMENTS_BYTES / 1024 / 1024} MB per email.`);
+  let budget = MAX_ATTACHMENTS_BYTES;
   const out: OutAttachment[] = [];
   for (const f of files) {
     const ref: RecordRef = f.dealId ? { type: "deal", id: f.dealId } : f.opportunityId ? { type: "opportunity", id: f.opportunityId } : { type: "buyer", id: f.buyerId! };
     await loadRecord(req, ref);
-    const bytes = await getObjectBytes(f.s3Key, MAX_ATTACHMENTS_BYTES);
+    const bytes = await getObjectBytes(f.s3Key, budget);
+    budget -= bytes.length;
     out.push({ name: f.filename, contentType: f.mimeType, size: bytes.length, read: async (o, l) => bytes.subarray(o, o + l) });
   }
   return out;

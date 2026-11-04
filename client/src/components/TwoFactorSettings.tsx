@@ -24,6 +24,9 @@ export function TwoFactorSettings() {
   const [qr, setQr] = useState<string | null>(null);
   const [enableCode, setEnableCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  // Enrolment confirms the current password first (the API requires it).
+  const [askPassword, setAskPassword] = useState(false);
+  const [password, setPassword] = useState("");
 
   // Render the otpauth URI to a scannable QR image whenever setup starts.
   useEffect(() => {
@@ -42,7 +45,8 @@ export function TwoFactorSettings() {
   async function startSetup() {
     setError(null); setBusy(true); setRecoveryCodes(null);
     try {
-      setSetup(await api.post<SetupResp>("/auth/2fa/setup"));
+      setSetup(await api.post<SetupResp>("/auth/2fa/setup", { password }));
+      setAskPassword(false); setPassword("");
     } catch (e) { setError(e instanceof ApiError ? e.message : "Could not start setup"); }
     finally { setBusy(false); }
   }
@@ -89,8 +93,8 @@ export function TwoFactorSettings() {
         badge={status && <Tag tone={enabled ? "success" : "neutral"} dot>{enabled ? "On" : "Off"}</Tag>}
         desc="Add a one-time code from an authenticator app (Google Authenticator, Authy, 1Password…) as a second step when signing in."
         aside={
-          status && !enabled && !setup ? (
-            <button className="primary" disabled={busy} onClick={startSetup}>{busy ? "Please wait…" : "Set up"}</button>
+          status && !enabled && !setup && !askPassword ? (
+            <button className="primary" disabled={busy} onClick={() => { setError(null); setAskPassword(true); }}>Set up</button>
           ) : enabled && !showDisable ? (
             <button onClick={() => setShowDisable(true)}>Manage / disable</button>
           ) : null
@@ -105,6 +109,19 @@ export function TwoFactorSettings() {
           <div className="recovery-grid">{recoveryCodes.map((c) => <code key={c}>{c}</code>)}</div>
           <button className="small" style={{ marginTop: 8 }} onClick={() => navigator.clipboard?.writeText(recoveryCodes.join("\n")).catch(() => {})}>Copy all</button>
         </Banner>
+      )}
+
+      {askPassword && !setup && !enabled && (
+        <div className="twofa-manage">
+          <div className="field">
+            <label>Confirm your current password to continue</label>
+            <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && password && !busy) startSetup(); }} />
+          </div>
+          <div className="row">
+            <button className="primary" disabled={busy || !password} onClick={startSetup}>{busy ? "Please wait…" : "Continue"}</button>
+            <button className="set-btn-ghost" onClick={() => { setAskPassword(false); setPassword(""); }}>Cancel</button>
+          </div>
+        </div>
       )}
 
       {setup && (

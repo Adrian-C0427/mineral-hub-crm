@@ -356,7 +356,7 @@ opportunitiesRouter.post(
       // it, all in this transaction — no half-created opportunity or contact.
       const sellerCols = data.seller
         ? opportunitySellerFromInfo(data.seller, (await resolveSellerContact(tx, org, data.seller, {
-            ownerId: fields.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m), manage: access.manage,
+            ownerId: fields.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m), manage: access.manage, view: access.view,
           })).contact, access.view)
         : {};
       const o = await tx.opportunity.create({
@@ -402,7 +402,7 @@ opportunitiesRouter.patch(
         // A seller block re-resolves the contact (link / match / create) and
         // refreshes the plain seller columns from it.
         const { contact } = await resolveSellerContact(tx, org, data.seller as SellerInfo, {
-          ownerId: fields.ownerId ?? o.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m), manage: access.manage,
+          ownerId: fields.ownerId ?? o.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m), manage: access.manage, view: access.view,
         });
         Object.assign(patch, opportunitySellerFromInfo(data.seller as SellerInfo, contact, access.view));
         // The block's values are the shared ones: mirror them onto the contact.

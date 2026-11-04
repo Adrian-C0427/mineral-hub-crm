@@ -68,11 +68,19 @@ const enc = (id: string) => {
   return encodeURIComponent(id);
 };
 
-/** A nextLink handed back by the client must be a Graph mail URL for this mailbox. */
-function ownLink(link: string): string {
-  if (!/^https:\/\/graph\.microsoft\.com\/v1\.0\/me\/(mailFolders|messages)\b/.test(link)) throw new ProviderError("Invalid page cursor.", "invalid");
-  return link;
+/**
+ * A nextLink handed back by the client must be a Graph mail URL for this
+ * mailbox. Checked on the PARSED url — what providerFetch will request — not
+ * the raw string: `/me/messages/../../me/drive/...` passes a prefix test and
+ * is fetched as `/me/drive/...`.
+ */
+export function ownMailLink(link: string): string {
+  let u: URL;
+  try { u = new URL(link); } catch { throw new ProviderError("Invalid page cursor.", "invalid"); }
+  if (u.origin !== "https://graph.microsoft.com" || !/^\/v1\.0\/me\/(mailFolders|messages)(\/|$)/.test(u.pathname)) throw new ProviderError("Invalid page cursor.", "invalid");
+  return u.href;
 }
+const ownLink = ownMailLink;
 
 /** The mailbox's folders (top level + one level of children), with well-known ones tagged. */
 export async function listFolders(a: ConnectedAccount): Promise<MailFolder[]> {

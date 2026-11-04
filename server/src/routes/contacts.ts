@@ -63,8 +63,10 @@ const serialize = (c: ContactWithOwner) => ({
   listIds: (c.lists ?? []).map((l) => l.id),
 });
 
+// Absent stays absent: zod runs the transform for a missing key too, so
+// mapping undefined to null made every PATCH that left these out clear them.
 const dateField = z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).nullish()
-  .transform((v) => (v ? new Date(v.length === 10 ? `${v}T00:00:00Z` : v) : null));
+  .transform((v) => (v === undefined ? undefined : v ? new Date(v.length === 10 ? `${v}T00:00:00Z` : v) : null));
 
 // Optional free-text field: trimmed, and a blank string clears it (stored NULL).
 const optionalText = (max: number) => z.string().trim().max(max).nullish().transform((v) => (v === undefined ? undefined : v || null));

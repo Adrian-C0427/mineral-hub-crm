@@ -17,7 +17,12 @@ export interface OfferRow {
   expirationDate: string | null;
 }
 
-const STATUS_OPTIONS = ["ACTIVE", "REJECTED", "EXPIRED", "COUNTERED", "WITHDRAWN"].map((s) => ({ value: s, label: s[0] + s.slice(1).toLowerCase() }));
+const STATUS_OPTIONS = [
+  ...["ACTIVE", "REJECTED", "EXPIRED", "COUNTERED", "WITHDRAWN"].map((s) => ({ value: s, label: s[0] + s.slice(1).toLowerCase() })),
+  // A buyer-portal submission starts here and counts nowhere (best offer,
+  // Profit Est., close rates) until someone sets it Active.
+  { value: "PENDING_REVIEW", label: "Pending review (portal)" },
+];
 
 /**
  * What the accepted offer's status reads. OfferStatus has no CLOSED value, so

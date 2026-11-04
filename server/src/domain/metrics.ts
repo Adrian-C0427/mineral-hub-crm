@@ -51,13 +51,25 @@ export function acquisitionCost(d: { ourPrice: number | null; purchasePrice?: nu
 type OfferLike = { id?: string; amount: number; status?: string };
 
 /**
+ * Buyer-portal submissions nobody has confirmed yet. The portal is public, so
+ * a submission is a claim, not an offer: it is listed on the deal but counted
+ * nowhere — best offer, Profit Est., High Offer, close rates, buyer matching —
+ * until someone confirms it (PATCH /offers/:id with another status).
+ */
+export const PENDING_REVIEW_STATUS = "PENDING_REVIEW";
+export function countedOffers<O extends OfferLike>(offers: O[] | undefined): O[] {
+  return (offers ?? []).filter((o) => o.status !== PENDING_REVIEW_STATUS);
+}
+
+/**
  * The deal's ACCEPTED offer: the one the deal selected (selectedOfferId), else
  * one whose own status is ACCEPTED. Undefined when none is accepted.
  */
 export function acceptedOffer<O extends OfferLike>(offers: O[] | undefined, selectedOfferId: string | null | undefined): O | undefined {
-  if (!offers?.length) return undefined;
-  return (selectedOfferId ? offers.find((o) => o.id === selectedOfferId) : undefined)
-    ?? offers.find((o) => o.status === "ACCEPTED");
+  const counted = countedOffers(offers);
+  if (!counted.length) return undefined;
+  return (selectedOfferId ? counted.find((o) => o.id === selectedOfferId) : undefined)
+    ?? counted.find((o) => o.status === "ACCEPTED");
 }
 
 /**
@@ -69,8 +81,9 @@ export function acceptedOffer<O extends OfferLike>(offers: O[] | undefined, sele
 export function dealSalePrice(offers: OfferLike[] | undefined, selectedOfferId: string | null | undefined): number | null {
   const acc = acceptedOffer(offers, selectedOfferId);
   if (acc) return acc.amount;
-  if (!offers?.length) return null;
-  return offers.reduce((m, o) => (o.amount > m ? o.amount : m), -Infinity);
+  const counted = countedOffers(offers);
+  if (!counted.length) return null;
+  return counted.reduce((m, o) => (o.amount > m ? o.amount : m), -Infinity);
 }
 
 /** Net profit of a deal at a given buyer price (accepted/best offer). */

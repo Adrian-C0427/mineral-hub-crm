@@ -33,9 +33,24 @@ export const STATE_CODES: Record<string, string> = {
 };
 const STATE_CODE_SET = new Set(Object.values(STATE_CODES));
 
+/**
+ * Drop a trailing run of any of `chars` — what `/[,\s]+$/` did, but by walking
+ * the string. A regex with an unbounded run before `$` backtracks from every
+ * position on a long run of separators (quadratic): a 20 KB cell of commas
+ * took seconds, and these cells arrive in 25 MB import bodies.
+ */
+function trimEndChars(s: string, chars: string): string {
+  let end = s.length;
+  while (end > 0 && chars.includes(s[end - 1])) end--;
+  return end === s.length ? s : s.slice(0, end);
+}
+
+/** Collapse whitespace runs to one space (one linear pass). */
+const oneSpaced = (s: string): string => s.replace(/\s+/g, " ").trim();
+
 /** "Texas", "TEXAS", "tx", "Tex." → "TX". Unknown text is uppercased as before. */
 export function normState(s: string): string {
-  const t = s.trim().toUpperCase().replace(/[.,]+$/, "").replace(/\s+/g, " ");
+  const t = oneSpaced(trimEndChars(s.trim().toUpperCase(), ".,"));
   if (STATE_CODES[t]) return STATE_CODES[t];
   if (t === "TEX") return "TX";
   if (t.startsWith("STATE OF ") && STATE_CODES[t.slice(9)]) return STATE_CODES[t.slice(9)];
@@ -48,14 +63,24 @@ export function normState(s: string): string {
  * Longest match first, so "New Mexico" is never read as "Mexico".
  */
 function stateSuffix(s: string): { rest: string; state: string | null } {
-  const t = s.trim().replace(/\s+/g, " ");
+  const t = oneSpaced(s);
+  // The last 1–3 words as the state, the words before them as the place: the
+  // same split `^(.*?\S)([,\s]+)((?:[A-Za-z.]+ ){n}[A-Za-z.]+)$` made, done on
+  // the word list so a long cell costs one pass instead of a backtracking one.
+  const tokens = t.split(" ");
   for (const words of [3, 2, 1]) {
-    const m = new RegExp(`^(.*?\\S)([,\\s]+)((?:[A-Za-z.]+ ){${words - 1}}[A-Za-z.]+)$`).exec(t);
-    if (!m) continue;
+    if (tokens.length <= words) continue;
+    const tail = tokens.slice(-words);
+    if (!tail.every((w) => /^[A-Za-z.]+$/.test(w))) continue;
+    const head = tokens.slice(0, -words).join(" ");
+    const rest = trimEndChars(head, ", ");
+    if (!rest) continue;
+    const sep = head.slice(rest.length) + " ";
+    const state = tail.join(" ");
     // "McMullen Co." is the county word, not Colorado (that needs a comma: "Denver, CO").
-    if (/^co\.?$/i.test(m[3]) && !m[2].includes(",")) continue;
-    const code = normState(m[3]);
-    if (STATE_CODE_SET.has(code)) return { rest: m[1].replace(/[,\s]+$/, ""), state: code };
+    if (/^co\.?$/i.test(state) && !sep.includes(",")) continue;
+    const code = normState(state);
+    if (STATE_CODE_SET.has(code)) return { rest, state: code };
   }
   return { rest: t, state: null };
 }
@@ -77,8 +102,10 @@ const COUNTY_CAMEL: Record<string, string> = {
  */
 export function titleCounty(s: string): string {
   // "Leon County, TX" / "Leon, Texas": the state belongs in its own column.
-  let t = stateSuffix(s).rest;
-  t = t.replace(/[\s,]+(county|co\.?|parish|borough)$/i, "").replace(/[,\s]+$/, "").trim();
+  let t = trimEndChars(stateSuffix(s).rest, ", ");
+  // One separator char + the word + end: bounded work per position, no run.
+  const m = /[\s,](county|co\.?|parish|borough)$/i.exec(t);
+  if (m) t = trimEndChars(t.slice(0, m.index), ", ").trim();
   const cap = (x: string) => (x ? x[0].toUpperCase() + x.slice(1).toLowerCase() : x);
   const words = t.split(" ").map((w, i) => {
     const up = w.toUpperCase();
@@ -111,7 +138,9 @@ export function countyCell(cell: string): { county: string; state: string | null
 export function abstractNumbers(raw: string | null | undefined): string[] {
   if (!raw) return [];
   const out: string[] = [];
-  for (const part of String(raw).split(/[,;/&]+|\s+and\s+/i)) {
+  // Whitespace collapsed first: `\s+and\s+` on a raw run of spaces backtracks
+  // from every position of the run.
+  for (const part of oneSpaced(String(raw)).split(/[,;/&]+| and /i)) {
     const p = part.trim();
     if (!/\d/.test(p)) continue;
     const n = isSectionLabel(p) ? p.replace(/\s+/g, " ") : abstractNumber(p);
@@ -128,7 +157,9 @@ const LEADING_ABSTRACT = /^\s*(?:abstract|abst|abs|a)\.?\s*(?:no\.?|#)?\s*-?\s*\
  * abstract number is dropped first. Null for a blank (or number-only) cell.
  */
 export function surveyName(cell: string | null | undefined): string | null {
-  const s = (cell ?? "").replace(LEADING_ABSTRACT, "").trim().replace(/[\s,;:·-]+$/, "");
+  // Whitespace collapsed first: LEADING_ABSTRACT has several adjacent `\s*`
+  // groups, which share a long run of spaces every way they can.
+  const s = trimEndChars(oneSpaced(cell ?? "").replace(LEADING_ABSTRACT, "").trim(), " ,;:·-");
   if (!s || !/[a-z]/i.test(s)) return null;
   return surveyLabel(s) || null;
 }

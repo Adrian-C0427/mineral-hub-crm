@@ -48,7 +48,7 @@ export function parseFromAddress(raw: string): string | null {
 // --- Provider fetchers -------------------------------------------------------
 
 async function providerJson(url: string, token: string): Promise<Record<string, unknown>> {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
     const err = (json.error ?? {}) as { message?: string };

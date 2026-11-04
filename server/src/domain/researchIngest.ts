@@ -28,6 +28,13 @@ export const MAX_INGEST_ROWS = 50_000;
 // characters; the party parser does per-character work on each cell, so an
 // oversized one is rejected rather than parsed.
 export const MAX_PARTY_CELL_CHARS = 4_000;
+// Cap one location cell (abstract / survey / county / state). The geography
+// parser (domain/researchGeo.ts) runs several patterns over each; a real cell
+// is a few dozen characters, a combined legal description a few hundred.
+export const MAX_LOCATION_CELL_CHARS = 500;
+// Cap any other mapped cell before its parser sees it (dates, doc types,
+// operators, numbers…): nothing in a county export is this long.
+export const MAX_CELL_CHARS = 10_000;
 const CHUNK = 500;
 
 export function parseCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
@@ -163,8 +170,12 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
   // Nothing missing is invented: a blank survey is only filled from the GIS
   // abstract layer below, where county + abstract number name it.
   const geoOf = (row: Record<string, string>) => {
+    // Oversized location cells are never parsed: the row is rejected below.
+    const tooLong = ["abstractId", "survey", "county", "state"].some((f) => get(row, f).length > MAX_LOCATION_CELL_CHARS);
+    if (tooLong) return { tooLong, state: null, county: null, abstractId: null, abstractIds: [] as string[], survey: null, legalDescription: null };
     const loc = locationFields({ abstract: get(row, "abstractId"), survey: get(row, "survey"), county: get(row, "county") });
     return {
+      tooLong,
       state: get(row, "state") ? normState(get(row, "state")) : loc.state ?? fallbackState,
       county: loc.county ?? fallbackCounty,
       abstractId: loc.abstractCell,
@@ -175,6 +186,12 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     };
   };
   type Geo = ReturnType<typeof geoOf>;
+  // The reason a row's cells are too long to parse, if any (checked first).
+  const oversized = (row: Record<string, string>, g: Geo): string | null => {
+    if (g.tooLong) return `Location cell longer than ${MAX_LOCATION_CELL_CHARS.toLocaleString()} characters`;
+    for (const field of Object.keys(mapping)) if (get(row, field).length > MAX_CELL_CHARS) return `Cell longer than ${MAX_CELL_CHARS.toLocaleString()} characters`;
+    return null;
+  };
   // The location as it will be stored, beside the raw cells in the review trail.
   const geoView = (g: Geo) => ({
     abstract: g.abstractIds.join(", "), surveyName: g.survey ?? "",
@@ -295,6 +312,8 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         abstractId: get(row, "abstractId"), survey: get(row, "survey"),
         ...geoView(g),
       };
+      const tooLong = oversized(row, g);
+      if (tooLong) { record(i, "REJECTED", tooLong, data); continue; }
       const cls = reviewedTransfers && wantClass === "TRANSACTION" ? classifyReviewedDocType(docTypeRaw) : classifyDocType(docTypeRaw);
       if (!cls) { record(i, "REJECTED", docTypeRaw ? `Not mineral-related: "${docTypeRaw}"` : "Missing document type", data); continue; }
       // Scope to the selected Data Type: Deeds keep transfers, Leases keep leases.
@@ -428,6 +447,8 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         abstractId: get(row, "abstractId"), survey: get(row, "survey"),
         ...geoView(g),
       };
+      const tooLong = oversized(row, g);
+      if (tooLong) { record(i, "REJECTED", tooLong, data); continue; }
       if (!operator) { record(i, "REJECTED", "Missing operator", data); continue; }
       const rowState = g.state;
       const rowCounty = g.county;

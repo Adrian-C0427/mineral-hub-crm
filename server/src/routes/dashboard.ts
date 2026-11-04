@@ -6,7 +6,7 @@ import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
-import { acquisitionCost, dealNetProfit, dealSalePrice, profitAtAsk } from "../domain/metrics.js";
+import { acquisitionCost, dealNetProfit, dealSalePrice, profitAtAsk, countedOffers } from "../domain/metrics.js";
 import { avgMoney, roundMoney, sumMoney } from "../domain/money.js";
 import { closingIsExtended, profitClosingDate } from "../domain/dates.js";
 import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
@@ -185,7 +185,7 @@ export function profitAtAskSeries<T extends ActiveProfitDeal>(
 ): SeriesResult {
   const rows: { d: T; profit: number; amount: number | null }[] = [];
   for (const d of deals) {
-    if (d.offers.length) continue; // has an offer → it's in Projected, never here
+    if (countedOffers(d.offers).length) continue; // has an offer → it's in Projected, never here
     const profit = profitAtAsk(d.askPrice, acquisitionCost(d), d.estimatedClosingCosts);
     if (profit == null) continue;
     rows.push({ d, profit, amount: d.askPrice });

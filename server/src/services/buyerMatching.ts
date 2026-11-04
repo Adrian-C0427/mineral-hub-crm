@@ -261,9 +261,10 @@ export async function crmHistories(scope: CrmScope, buyers: { id: string; relati
   const dealCounties = new Set(scope.dealCounties.map((c) => countyKey(scope.dealState, c)));
   const notThis = dealId ? { id: { not: dealId } } : {};
   const [deals, offers, activities, messages] = await Promise.all([
-    db.deal.findMany({ where: { organizationId: orgId, ...notThis, OR: [{ selectedBuyerId: { in: buyerIds } }, { offers: { some: { buyerId: { in: buyerIds } } } }] },
+    // Portal submissions awaiting review are not offers yet (domain/metrics.ts).
+    db.deal.findMany({ where: { organizationId: orgId, ...notThis, OR: [{ selectedBuyerId: { in: buyerIds } }, { offers: { some: { buyerId: { in: buyerIds }, status: { not: "PENDING_REVIEW" } } } }] },
       select: { id: true, stage: true, state: true, counties: true, acreageNma: true, askPrice: true, selectedBuyerId: true, closedDate: true, updatedAt: true } }),
-    db.offer.findMany({ where: { buyerId: { in: buyerIds }, deal: { organizationId: orgId, ...notThis } }, select: { dealId: true, buyerId: true, status: true, amount: true, dateSubmitted: true } }),
+    db.offer.findMany({ where: { buyerId: { in: buyerIds }, status: { not: "PENDING_REVIEW" }, deal: { organizationId: orgId, ...notThis } }, select: { dealId: true, buyerId: true, status: true, amount: true, dateSubmitted: true } }),
     db.dealBuyerActivity.findMany({ where: { buyerId: { in: buyerIds }, deal: { organizationId: orgId, ...notThis } },
       select: { dealId: true, buyerId: true, status: true, responseStatus: true, responseReceived: true, dateSent: true, lastActivityDate: true } }),
     db.dealBuyerMessage.findMany({ where: { buyerId: { in: buyerIds }, kind: { in: [...MEANINGFUL_KINDS] }, deal: { organizationId: orgId, ...notThis } }, select: { buyerId: true, occurredAt: true } }),

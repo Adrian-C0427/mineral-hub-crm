@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, buyerNetworkOrgIds, contactAccess, hasPermission, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal, serializeContractExtension } from "../serializers.js";
+import { countedOffers } from "../domain/metrics.js";
 import { compareMatches, type BuyerMatchResult } from "../domain/buyerMatch.js";
 import { matchBuyersForDeal, type MatchBuyerRow } from "../services/buyerMatching.js";
 import { normalizePhone } from "../domain/phone.js";
@@ -453,7 +454,7 @@ dealsRouter.post(
       if (data.seller) {
         const access = contactAccess(req);
         const { contact, created: newContact } = await resolveSellerContact(tx, orgId(req), data.seller, {
-          ownerId: data.relationshipOwnerId ?? req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m), manage: access.manage,
+          ownerId: data.relationshipOwnerId ?? req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m), manage: access.manage, view: access.view,
         });
         await tx.dealSeller.create({ data: { dealId: created.id, ...dealSellerFromInfo(data.seller, contact, access.view) } });
         // The seller's geography of interest, from the deal, when the contact
@@ -569,8 +570,10 @@ export async function dealDetail(organizationId: string, id: string, viewContact
   // Metrics row.
   const buyersContacted = activity.length;
   const interested = activity.filter((a) => ENGAGED_STATUSES.includes(a.status)).length;
-  const offerCount = deal.offers.length;
-  const highOffer = deal.offers.reduce<number | null>((max, o) => (max == null || o.amount > max ? o.amount : max), null);
+  // Portal submissions awaiting review are listed, never counted (domain/metrics.ts).
+  const counted = countedOffers(deal.offers);
+  const offerCount = counted.length;
+  const highOffer = counted.reduce<number | null>((max, o) => (max == null || o.amount > max ? o.amount : max), null);
 
   return {
     ...serializeDeal(deal, now),
@@ -812,6 +815,9 @@ dealsRouter.get(
     const overrideBy = new Map(deal.matchOverrides.map((o) => [o.buyerId, o]));
 
     const now = new Date();
+    // The deeds behind a score are Research data: without viewResearch the
+    // aggregates (counts, distances) are returned, the record list is not.
+    const seesResearch = hasPermission(req, "viewResearch");
     const recs = buyers.map((b) => {
       const m = matches.get(b.id)!;
       const o = overrideBy.get(b.id) ?? null;
@@ -831,7 +837,7 @@ dealsRouter.get(
         components: m.components,
         criteria: m.criteria,
         highlights: m.highlights,
-        facts: m.facts,
+        facts: seesResearch ? m.facts : { ...m.facts, recentNearby: [] },
         override: o ? { kind: o.kind as (typeof OVERRIDE_KINDS)[number], note: o.note, by: userRef(o.createdBy), at: o.updatedAt } : null,
         owners: b.owners.map((x) => x.user.name),
         previousDealsClosed: closedBy.get(b.id) ?? 0,
@@ -1608,7 +1614,7 @@ dealsRouter.post(
         phone: cols.primaryPhone, email: cols.email,
         mailingAddress: cols.mailingAddress, mailingCity: cols.mailingCity, mailingState: cols.mailingState, mailingZip: cols.mailingZip,
       });
-      const { contact } = await resolveSellerContact(tx, orgId(req), info, { ownerId: req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m), manage: access.manage });
+      const { contact } = await resolveSellerContact(tx, orgId(req), info, { ownerId: req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m), manage: access.manage, view: access.view });
       const fromContact = dealSellerFromInfo(info, contact, access.view);
       return tx.dealSeller.create({
         data: {

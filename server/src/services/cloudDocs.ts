@@ -40,7 +40,7 @@ const GOOGLE_EXPORTABLE = new Set([
 ]);
 
 async function providerJson(url: string, token: string): Promise<Record<string, unknown>> {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
     const err = (json.error ?? {}) as { message?: string };
@@ -100,7 +100,7 @@ export async function listProviderFiles(row: Integration, q: string): Promise<Cl
 // --- Import ----------------------------------------------------------------------
 
 async function downloadBytes(url: string, token: string): Promise<Buffer> {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(60_000) });
   if (!res.ok) throw new HttpError(502, `Provider download failed (HTTP ${res.status}).`);
   const limit = env.MAX_UPLOAD_BYTES;
   const tooBig = () => new HttpError(413, `File exceeds the ${Math.round(limit / (1024 * 1024))} MB import limit.`);

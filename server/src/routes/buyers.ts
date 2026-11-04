@@ -36,8 +36,9 @@ buyersRouter.use("/import", requirePermission("createBuyers"), importRouter);
  *  A win counts only on a deal the buyer offered on, so the numerator is a
  *  subset of the denominator and the rate can never read above 100%. */
 async function buyerCloseRate(buyerId: string, organizationId: string): Promise<{ rate: number; closedWon: number; dealsWithOffer: number }> {
-  const closedWon = await prisma.deal.count({ where: { selectedBuyerId: buyerId, stage: "CLOSED", organizationId, offers: { some: { buyerId } } } });
-  const offerDeals = await prisma.offer.findMany({ where: { buyerId, deal: { organizationId } }, select: { dealId: true }, distinct: ["dealId"] });
+  // Portal submissions awaiting review are not offers yet (domain/metrics.ts).
+  const closedWon = await prisma.deal.count({ where: { selectedBuyerId: buyerId, stage: "CLOSED", organizationId, offers: { some: { buyerId, status: { not: "PENDING_REVIEW" } } } } });
+  const offerDeals = await prisma.offer.findMany({ where: { buyerId, status: { not: "PENDING_REVIEW" }, deal: { organizationId } }, select: { dealId: true }, distinct: ["dealId"] });
   const dealsWithOffer = offerDeals.length;
   return { rate: closeRate(closedWon, dealsWithOffer), closedWon, dealsWithOffer };
 }
@@ -57,7 +58,7 @@ async function closeRatesByBuyer(organizationId: string): Promise<Map<string, { 
     }),
     // groupBy on the pair yields one row per DISTINCT (buyer, deal) — the same
     // thing the per-buyer `distinct: ["dealId"]` query was computing.
-    prisma.offer.groupBy({ by: ["buyerId", "dealId"], where: { deal: { organizationId } } }),
+    prisma.offer.groupBy({ by: ["buyerId", "dealId"], where: { status: { not: "PENDING_REVIEW" }, deal: { organizationId } } }),
   ]);
 
   const out = new Map<string, { closedWon: number; dealsWithOffer: number }>();

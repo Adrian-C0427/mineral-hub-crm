@@ -1903,11 +1903,14 @@ researchRouter.post(
 const commitSchema = z.object({
   category: z.enum(["deeds", "leases", "permits"]),
   csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large"),
-  mapping: z.record(z.string(), z.string()),
-  filename: z.string().optional(),
+  mapping: z.record(z.string().max(100), z.string().max(500)),
+  // Stored on the run and copied onto every row it imports: bounded.
+  filename: z.string().max(300).optional(),
   // Fallback State/County the user assigns when the file has no such columns.
-  assignedState: z.string().trim().min(1).optional(),
-  assignedCounty: z.string().trim().min(1).optional(),
+  // Bounded before they reach the geography parser (domain/researchGeo.ts),
+  // which was handed them unparsed from a 25 MB body.
+  assignedState: z.string().trim().min(1).max(40).optional(),
+  assignedCounty: z.string().trim().min(1).max(100).optional(),
   // Deeds: the user reviewed every row as a mineral transfer, so general
   // instrument types (Warranty Deed, Assignment, …) import too.
   reviewedTransfers: z.boolean().optional(),

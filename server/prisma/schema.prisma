@@ -127,6 +127,9 @@ enum OfferStatus {
   EXPIRED
   COUNTERED
   WITHDRAWN
+  // A buyer-portal submission nobody has confirmed yet: listed on the deal,
+  // counted nowhere (domain/metrics.ts countedOffers). Confirming sets another status.
+  PENDING_REVIEW
 }
 
 enum FileCategory {
