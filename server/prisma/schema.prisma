@@ -604,6 +604,7 @@ model User {
   buyerOwnerships        BuyerOwner[]
   stageChanges           DealStageHistory[]
   sentActivities         DealBuyerActivity[]     @relation("SentActivities")
+  matchOverrides         DealBuyerMatchOverride[] @relation("MatchOverrides")
   assignedActivities     DealBuyerActivity[]     @relation("AssignedActivities")
   authoredMessages       DealBuyerMessage[]      @relation("AuthoredMessages")
   uploadedFiles          FileAttachment[]
@@ -828,6 +829,7 @@ model Deal {
   buyerActivity      DealBuyerActivity[]
   buyerMessages      DealBuyerMessage[]
   offers             Offer[]                 @relation("DealOffers")
+  matchOverrides     DealBuyerMatchOverride[]
   files              FileAttachment[]
   portalEvents       PortalEvent[]
   activityLogs       ActivityLog[]
@@ -1064,6 +1066,7 @@ model Buyer {
   dealActivity   DealBuyerActivity[]
   buyerMessages  DealBuyerMessage[]
   offers         Offer[]             @relation("BuyerOffers")
+  matchOverrides DealBuyerMatchOverride[]
   selectedFor    Deal[]              @relation("SelectedBuyer")
   files          FileAttachment[]
   activityLogs   ActivityLog[]
@@ -1083,10 +1086,48 @@ model BuyBoxCriteria {
   states     String[]
   counties   String[]
   assetTypes String[]
+  // Net mineral acres (the "acreage" the buyer talks about).
   minAcreage Float?
   maxAcreage Float?
+  // Deal size, total dollars.
   minPrice   Float?
   maxPrice   Float?
+  // Further stated criteria (domain/buyerMatch.ts). All optional; blank means
+  // the buyer has not told us, NOT that they take anything.
+  minNra         Float?
+  maxNra         Float?
+  maxPricePerNma Float?
+  // Deal lease statuses the buyer wants (Leased, Held By Production, …) and
+  // operators they follow. Empty = not stated.
+  leaseStatuses  String[] @default([])
+  operators      String[] @default([])
+  // Minimum lease royalty as a decimal fraction (3/16 = 0.1875).
+  minRoyalty     Float?
+  // Criteria the buyer treats as hard requirements (criterion keys, e.g.
+  // "acreage", "county"). A deal that fails one is ineligible for this buyer;
+  // every other criterion is a preference that only moves the score.
+  strictKeys     String[] @default([])
+  notes          String?
+}
+
+// A person's call on one buyer for one deal, kept apart from the computed
+// match score: pin the buyer to the top, leave them out, or flag them for a
+// look. The score itself is never edited by hand.
+model DealBuyerMatchOverride {
+  id              String   @id @default(cuid())
+  dealId          String
+  deal            Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId         String
+  buyer           Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  kind            String // PRIORITIZE | EXCLUDE | FLAG
+  note            String?
+  createdByUserId String?
+  createdBy       User?    @relation("MatchOverrides", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  @@unique([dealId, buyerId])
+  @@index([buyerId])
 }
 
 model BuyerOwner {

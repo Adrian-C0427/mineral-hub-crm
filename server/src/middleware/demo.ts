@@ -74,6 +74,10 @@ export const DEMO_WRITE_ALLOWLIST: readonly string[] = [
   "POST /api/deals/:id/activity/:buyerId/messages",
   "PATCH /api/deals/:id/activity/:buyerId/messages/:messageId",
   "POST /api/deals/:id/contact-bulk",
+  // Buyer-match overrides are the visitor's own pin / flag / exclude marks on
+  // a deal (PUT with kind null clears one; the DELETE form stays locked like
+  // every other delete).
+  "PUT /api/deals/:id/matches/:buyerId/override",
   "POST /api/deals/:id/accept-offer",
   "POST /api/deals/:id/sellers",
   "PATCH /api/deals/:id/sellers/:sellerId",

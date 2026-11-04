@@ -14,6 +14,7 @@ import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
+import { BuyerMatches } from "../components/BuyerMatches";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
 import { OfferRowActions, acceptedOfferLabel } from "../components/OfferActions";
@@ -669,7 +670,6 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
   const [logBuyer, setLogBuyer] = useState<{ id: string; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showEmail, setShowEmail] = useState(false);
-  const [showAllMatches, setShowAllMatches] = useState(false);
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
   const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
@@ -884,62 +884,22 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
 
       <CollapsibleSection
         title="Buyer match recommendations"
-        sub="Ranked by fit with this asset"
+        sub="Every buyer, ranked by where they buy, their buy box, activity and our history with them"
         right={matches ? <span className="muted" style={{ fontSize: 12.5 }}>{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}
       >
-        {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> : (
-          <>
-            {canEdit && (
-              <div className="ad-match-bar">
-                <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
-                <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send via email</button>
-                <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark contacted</button>
-                <span className="mr-legend">● matched · ○ not in buyer's buy box</span>
-              </div>
-            )}
-            <div className="mr-list">
-            {(showAllMatches ? matches : matches.slice(0, 6)).map((m) => {
-              const ring = 2 * Math.PI * 16;
-              const ringColor = m.matchPercent >= 70 ? "#22c55e" : m.matchPercent >= 55 ? "#f5b04b" : "#5a6274";
-              return (
-              <div className={`match-card ${selected.has(m.buyerId) ? "match-selected" : ""}`} key={m.buyerId}>
-                <div className="match-card-head">
-                  {canEdit && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => setSelected((p) => { const n = new Set(p); n.has(m.buyerId) ? n.delete(m.buyerId) : n.add(m.buyerId); return n; })} />}
-                  <span className="match-rank">#{m.rank}</span>
-                  <span className="mr-ring" aria-label={`${m.matchPercent}% match`}>
-                    <svg width="40" height="40" viewBox="0 0 40 40">
-                      <circle cx="20" cy="20" r="16" fill="none" stroke="var(--hairline)" strokeWidth="4" />
-                      <circle cx="20" cy="20" r="16" fill="none" stroke={ringColor} strokeWidth="4" strokeLinecap="round"
-                        strokeDasharray={`${((ring * m.matchPercent) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 20 20)" />
-                    </svg>
-                    <span className="mr-ring-n">{m.matchPercent}</span>
-                  </span>
-                  <span className="mr-title">
-                    <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link">{m.companyName || m.buyerName}</Link>
-                    {m.matchPercent >= 70 && m.criteriaSpecified >= 4 && <CtPill color="#22c55e">Strong fit</CtPill>}
-                    {m.lastContactDate && <span className="mr-contacted">Contacted</span>}
-                  </span>
-                  <span className="mr-crit">
-                    {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria met` : "no buy box set"}
-                  </span>
-                </div>
-                <div className="mr-tags">
-                  {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
-                  {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
-                </div>
-              </div>
-              );
-            })}
-            </div>
-            {matches.length > 6 && (
-              <div className="mr-more">
-                <button className="ct-btn" onClick={() => setShowAllMatches((v) => !v)}>
-                  {showAllMatches ? "Show top 6" : `Show all ${matches.length} buyers`}
-                </button>
-              </div>
-            )}
-          </>
-        )}
+        <div className="deal-detail ad-matches">
+          <BuyerMatches
+            dealId={asset.id}
+            matches={matches}
+            canEdit={canEdit}
+            selected={selected}
+            onSelectedChange={setSelected}
+            onSendEmail={() => setShowEmail(true)}
+            onMarkContacted={markContacted}
+            onLogContact={(b) => setLogBuyer(b)}
+            onChanged={onChanged}
+          />
+        </div>
       </CollapsibleSection>
 
       {/* Location and Documents live ONLY on the Hold tab (the single source of

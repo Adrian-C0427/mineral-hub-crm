@@ -3,9 +3,10 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, contactAccess, hasPermission, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, buyerNetworkOrgIds, contactAccess, hasPermission, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal, serializeContractExtension } from "../serializers.js";
-import { computeMatch } from "../domain/matching.js";
+import { compareMatches, type BuyerMatchResult } from "../domain/buyerMatch.js";
+import { matchBuyersForDeal, type MatchBuyerRow } from "../services/buyerMatching.js";
 import { normalizePhone } from "../domain/phone.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
 import { syncAskToAcceptedOffer, ASK_SYNCED_EVENT } from "../services/acceptedOfferSync.js";
@@ -474,7 +475,7 @@ dealsRouter.get(
   "/:id",
   requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    res.json(await dealDetail(orgId(req), req.params.id, hasPermission(req, "viewContacts")));
+    res.json(await dealDetail(orgId(req), req.params.id, hasPermission(req, "viewContacts"), buyerNetworkOrgIds(req)));
   }),
 );
 
@@ -484,7 +485,7 @@ dealsRouter.get(
  * `viewContacts`: whether the caller may see the sellers' linked Contact
  * details (phone, email, mailing address) — see serializeSeller.
  */
-export async function dealDetail(organizationId: string, id: string, viewContacts: boolean) {
+export async function dealDetail(organizationId: string, id: string, viewContacts: boolean, researchOrgIds: string[] = [organizationId]) {
   const deal = await prisma.deal.findFirst({
     where: { id, organizationId },
     include: {
@@ -530,17 +531,20 @@ export async function dealDetail(organizationId: string, id: string, viewContact
     ? await prisma.user.findMany({ where: { id: { in: extenderIds } }, select: { id: true, name: true } })
     : [];
   const extenderById = new Map(extenders.map((u) => [u.id, userRef(u)]));
-  // Buyer activity rows with live match %.
+  // Buyer activity rows with the live match score (the same engine as /matches).
+  const matches = deal.buyerActivity.length
+    ? await matchBuyersForDeal({ orgId: organizationId, researchOrgIds, deal, buyers: deal.buyerActivity.map((a) => a.buyer) })
+    : new Map<string, BuyerMatchResult>();
   const activity = deal.buyerActivity.map((a) => {
-    const match = a.buyer.buyBox
-      ? computeMatch(deal, a.buyer.buyBox)
-      : computeMatch(deal, emptyBox());
+    const match = matches.get(a.buyerId);
     return {
       id: a.id,
       buyerId: a.buyerId,
       buyerName: a.buyer.name,
       companyName: a.buyer.companyName,
-      matchPercent: match.matchPercent,
+      matchPercent: match?.score ?? 0,
+      matchScore: match?.score ?? null,
+      matchConfidence: match?.confidence ?? "INSUFFICIENT",
       dateSent: a.dateSent,
       status: effectiveStatus(a),
       responseReceived: a.responseReceived,
@@ -779,22 +783,19 @@ dealsRouter.post(
   }),
 );
 
-function emptyBox() {
-  return {
-    states: [], counties: [], assetTypes: [],
-    minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
-  };
-}
+// --------------------------------------------------------------------------
+// Match recommendations — every active buyer, scored by domain/buyerMatch.ts
+// (geography from Research deeds, buy box, activity, relationship, fit), with
+// the person's own overrides shown beside the score, never folded into it.
+// --------------------------------------------------------------------------
+const OVERRIDE_KINDS = ["PRIORITIZE", "EXCLUDE", "FLAG"] as const;
 
-// --------------------------------------------------------------------------
-// Match recommendations — live, every buyer, ranked, NO filters
-// --------------------------------------------------------------------------
 dealsRouter.get(
   "/:id/matches",
   requirePermission("viewDeals"),
   requirePermission("viewBuyers"), // it returns the org's buyer roster
   asyncHandler(async (req: AuthedRequest, res) => {
-    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, include: { matchOverrides: { include: { createdBy: { select: userRefSelect } } } } });
     if (!deal) throw new HttpError(404, "Deal not found");
 
     const buyers = await prisma.buyer.findMany({
@@ -804,38 +805,97 @@ dealsRouter.get(
         owners: { include: { user: { select: { id: true, name: true } } } },
       },
     });
+    const matches = await matchBuyersForDeal({ orgId: orgId(req), researchOrgIds: buyerNetworkOrgIds(req), deal, buyers });
+    // Previous deals closed with each buyer (selected buyer on a CLOSED deal).
+    const closed = await prisma.deal.groupBy({ by: ["selectedBuyerId"], where: { organizationId: orgId(req), stage: "CLOSED", selectedBuyerId: { in: buyers.map((b) => b.id) } }, _count: true });
+    const closedBy = new Map(closed.map((c) => [c.selectedBuyerId, c._count]));
+    const overrideBy = new Map(deal.matchOverrides.map((o) => [o.buyerId, o]));
 
     const now = new Date();
-    const recs = await Promise.all(
-      buyers.map(async (b) => {
-        const match = computeMatch(deal, b.buyBox ?? emptyBox());
-        // # previous deals closed with this buyer (selected buyer on a CLOSED deal).
-        const closedCount = await prisma.deal.count({
-          where: { selectedBuyerId: b.id, stage: "CLOSED", organizationId: orgId(req) },
-        });
-        const lastContact = b.lastContactDate;
-        const stale = lastContact ? daysUntil(lastContact, now) < -STALE_CONTACT_DAYS : true;
-        return {
-          buyerId: b.id,
-          buyerName: b.name,
-          companyName: b.companyName,
-          matchPercent: match.matchPercent,
-          matching: match.matching,
-          nonMatching: match.nonMatching,
-          criteriaSpecified: match.criteriaSpecified,
-          criteriaSpecifiedMatched: match.criteriaSpecifiedMatched,
-          owners: b.owners.map((o) => o.user.name),
-          previousDealsClosed: closedCount,
-          lastContactDate: lastContact,
-          stale,
-        };
-      }),
-    );
+    const recs = buyers.map((b) => {
+      const m = matches.get(b.id)!;
+      const o = overrideBy.get(b.id) ?? null;
+      const lastContact = b.lastContactDate;
+      return {
+        buyerId: b.id,
+        buyerName: b.name,
+        companyName: b.companyName,
+        name: b.companyName || b.name,
+        score: m.score,
+        // Older clients read matchPercent; "no score" reads as 0 there.
+        matchPercent: m.score ?? 0,
+        confidence: m.confidence,
+        confidenceScore: m.confidenceScore,
+        eligible: m.eligible,
+        hardConflicts: m.hardConflicts,
+        components: m.components,
+        criteria: m.criteria,
+        highlights: m.highlights,
+        facts: m.facts,
+        override: o ? { kind: o.kind as (typeof OVERRIDE_KINDS)[number], note: o.note, by: userRef(o.createdBy), at: o.updatedAt } : null,
+        owners: b.owners.map((x) => x.user.name),
+        previousDealsClosed: closedBy.get(b.id) ?? 0,
+        lastContactDate: lastContact,
+        stale: lastContact ? daysUntil(lastContact, now) < -STALE_CONTACT_DAYS : true,
+      };
+    });
+    recs.sort((a, b) => compareMatches({ ...a, override: a.override?.kind ?? null }, { ...b, override: b.override?.kind ?? null }));
+    res.json(recs.map(({ name: _n, ...r }, i) => ({ rank: i + 1, ...r })));
+  }),
+);
 
-    // Equal percentages: the better-specified buy box ranks first — 100% of 5
-    // criteria is stronger evidence than 100% of an empty box.
-    recs.sort((a, b) => b.matchPercent - a.matchPercent || b.criteriaSpecified - a.criteriaSpecified);
-    res.json(recs.map((r, i) => ({ rank: i + 1, ...r })));
+// Manual overrides: pin, leave out, or flag a buyer for THIS deal. Stored apart
+// from the score and shown beside it; one override per buyer per deal. A null
+// kind clears it (so does DELETE).
+const overrideSchema = z.object({ kind: z.enum(OVERRIDE_KINDS).nullable(), note: z.string().trim().max(500).nullish() });
+
+async function clearOverride(req: AuthedRequest, deal: { id: string; name: string }, buyerId: string): Promise<number> {
+  const removed = await prisma.dealBuyerMatchOverride.deleteMany({ where: { dealId: deal.id, buyerId } });
+  if (removed.count) {
+    await logActivity({
+      eventType: "MATCH_OVERRIDE_CLEARED", organizationId: orgId(req), actorUserId: req.user!.id, dealId: deal.id, buyerId,
+      summary: `${req.user!.name} cleared a buyer override on "${deal.name}"`,
+    });
+  }
+  return removed.count;
+}
+
+dealsRouter.put(
+  "/:id/matches/:buyerId/override",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { kind, note } = overrideSchema.parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, name: true } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const buyer = await prisma.buyer.findFirst({ where: { id: req.params.buyerId, organizationId: orgId(req) }, select: { id: true, companyName: true } });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+    if (!kind) {
+      await clearOverride(req, deal, buyer.id);
+      return res.json({ kind: null });
+    }
+    const row = await prisma.dealBuyerMatchOverride.upsert({
+      where: { dealId_buyerId: { dealId: deal.id, buyerId: buyer.id } },
+      create: { dealId: deal.id, buyerId: buyer.id, kind, note: note ?? null, createdByUserId: req.user!.id },
+      update: { kind, note: note ?? null, createdByUserId: req.user!.id },
+      include: { createdBy: { select: userRefSelect } },
+    });
+    await logActivity({
+      eventType: "MATCH_OVERRIDE_SET", organizationId: orgId(req), actorUserId: req.user!.id, dealId: deal.id, buyerId: buyer.id,
+      summary: `${req.user!.name} ${kind === "PRIORITIZE" ? "prioritized" : kind === "EXCLUDE" ? "excluded" : "flagged"} ${buyer.companyName} for "${deal.name}"`,
+      metadata: { kind, note: note ?? null },
+    });
+    res.json({ kind: row.kind, note: row.note, by: userRef(row.createdBy), at: row.updatedAt });
+  }),
+);
+
+dealsRouter.delete(
+  "/:id/matches/:buyerId/override",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, name: true } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const removed = await clearOverride(req, deal, req.params.buyerId);
+    res.json({ ok: true, removed });
   }),
 );
 
@@ -1099,7 +1159,7 @@ dealsRouter.post(
         tx,
       );
     });
-    res.json(await dealDetail(orgId(req), deal.id, hasPermission(req, "viewContacts")));
+    res.json(await dealDetail(orgId(req), deal.id, hasPermission(req, "viewContacts"), buyerNetworkOrgIds(req)));
   }),
 );
 

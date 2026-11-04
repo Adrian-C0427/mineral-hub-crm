@@ -146,24 +146,54 @@ export interface RevenueEntry {
   note: string | null;
 }
 
+/** Criterion keys the buy box can mark as hard requirements (server domain/buyerMatch.ts). */
+export type BuyBoxKey = "state" | "county" | "assetType" | "acreage" | "nra" | "price" | "pricePerNma" | "leaseStatus" | "operator" | "royalty";
+
 export interface BuyBox {
   states: string[]; counties: string[]; assetTypes: string[];
   minAcreage: number | null; maxAcreage: number | null; minPrice: number | null; maxPrice: number | null;
+  minNra: number | null; maxNra: number | null; maxPricePerNma: number | null;
+  leaseStatuses: string[]; operators: string[];
+  /** Decimal fraction (3/16 → 0.1875). */
+  minRoyalty: number | null;
+  strictKeys: BuyBoxKey[];
+  notes: string | null;
 }
 
-export interface MatchCriterion { key: string; label: string; weight: number; matched: boolean; detail: string; }
+export type MatchConfidence = "HIGH" | "MEDIUM" | "LOW" | "INSUFFICIENT";
+export type MatchComponentKey = "geography" | "buyBox" | "activity" | "relationship" | "fit";
+export type MatchOverrideKind = "PRIORITIZE" | "EXCLUDE" | "FLAG";
+
+export interface MatchComponent { key: MatchComponentKey; label: string; weight: number; score: number | null; reasons: string[] }
+export interface MatchCriterion { key: BuyBoxKey; label: string; specified: boolean; strict: boolean; result: number | null; detail: string }
+export interface MatchFacts {
+  geoTier: string;
+  nearestAcquisitionMiles: number | null;
+  nearestAcquisitionDate: string | null;
+  sameAbstract: number; adjacentAbstract: number; within10mi: number; sameCounty: number; neighborCounty: number;
+  totalAcquisitions: number; last90d: number; last12m: number; lastAcquisitionDate: string | null;
+  recentNearby: { docId: string; date: string; county: string; miles: number | null; tier: string }[];
+}
+export interface MatchOverride { kind: MatchOverrideKind; note: string | null; by: UserRef | null; at: string }
 
 export interface MatchRec {
   rank: number;
   buyerId: string;
   buyerName: string;
   companyName: string;
+  /** 0–100, or null when there is too little evidence (shown as "Insufficient data"). */
+  score: number | null;
+  /** Legacy alias of score (0 when null). */
   matchPercent: number;
-  matching: MatchCriterion[];
-  nonMatching: MatchCriterion[];
-  /** How many buy-box criteria this buyer actually specified / matched. */
-  criteriaSpecified: number;
-  criteriaSpecifiedMatched: number;
+  confidence: MatchConfidence;
+  confidenceScore: number;
+  eligible: boolean;
+  hardConflicts: string[];
+  components: MatchComponent[];
+  criteria: MatchCriterion[];
+  highlights: string[];
+  facts: MatchFacts;
+  override: MatchOverride | null;
   owners: string[];
   previousDealsClosed: number;
   lastContactDate: string | null;
@@ -176,6 +206,8 @@ export interface BuyerActivityRow {
   buyerName: string;
   companyName: string;
   matchPercent: number;
+  matchScore: number | null;
+  matchConfidence: MatchConfidence;
   dateSent: string | null;
   status: BuyerStatus;
   responseReceived: boolean;

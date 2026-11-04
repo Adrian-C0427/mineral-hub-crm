@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, hasPermission, contactAccess, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, contactAccess, orgId, buyerNetworkOrgIds, type AuthedRequest } from "../middleware/auth.js";
 import { logActivity } from "../services/activityLog.js";
 import { ensureStages, ensureDefaultPipeline, activeStageKeys, isOpportunityPipeline, lockStageRow } from "../domain/stages.js";
 import { parseDayKey } from "../domain/calendar.js";
@@ -520,7 +520,7 @@ opportunitiesRouter.post(
     if (o.convertedDealId) throw new HttpError(409, "This opportunity has already been converted to a deal");
     const user = { id: req.user!.id, name: req.user!.name };
     const dealId = await prisma.$transaction((tx) => convertInTx(tx, { organizationId: org, user, opportunityId: o.id, targetPipelineId: pipelineId, viewContacts: hasPermission(req, "viewContacts") }));
-    res.json({ opportunity: await loadOpportunity(prisma, org, o.id, req), deal: await dealDetail(org, dealId, hasPermission(req, "viewContacts")) });
+    res.json({ opportunity: await loadOpportunity(prisma, org, o.id, req), deal: await dealDetail(org, dealId, hasPermission(req, "viewContacts"), buyerNetworkOrgIds(req)) });
   }),
 );
 

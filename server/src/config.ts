@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { DEFAULT_MATCH_WEIGHTS, normalizeWeights, type MatchWeights } from "./domain/buyerMatch.js";
 
 dotenv.config();
 
@@ -160,6 +161,22 @@ export const resendEnvConfigured = (): boolean => Boolean(env.RESEND.API_KEY && 
  * can send regardless of this flag.
  */
 export const emailConfigured = (): boolean => resendEnvConfigured() || smtpConfigured();
+
+/**
+ * Buyer-match component weights (domain/buyerMatch.ts). Override per deploy
+ * with BUYER_MATCH_WEIGHTS='{"geography":35,"buyBox":25,...}' while the model
+ * is being tuned; unknown or negative values fall back to the defaults.
+ */
+export const BUYER_MATCH_WEIGHTS: MatchWeights = (() => {
+  const raw = process.env.BUYER_MATCH_WEIGHTS;
+  if (!raw) return DEFAULT_MATCH_WEIGHTS;
+  try {
+    return normalizeWeights(JSON.parse(raw) as Partial<MatchWeights>);
+  } catch {
+    console.warn("BUYER_MATCH_WEIGHTS is not valid JSON — using the default weights");
+    return DEFAULT_MATCH_WEIGHTS;
+  }
+})();
 
 /**
  * Fail-closed check for secrets that MUST be real in production. Called at
