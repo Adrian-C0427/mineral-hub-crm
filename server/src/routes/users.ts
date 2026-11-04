@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { hashPassword } from "../auth/password.js";
@@ -13,6 +14,19 @@ import { disconnectMemberAccounts } from "../services/connected/accounts.js";
 export const usersRouter = Router();
 
 usersRouter.use(requireAuth, requireOrg, demoReadOnly());
+
+// Creating a member checks the address against EVERY account (emails are
+// global, not per org), so the conflict reply says whether an address has a
+// Mineral Hub account anywhere. Bounded per caller so it can't be looped into
+// a directory; the message no longer says who holds the address.
+const memberCreateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many new members in a short time. Try again later." },
+});
 
 usersRouter.get(
   "/",
@@ -57,10 +71,11 @@ const createSchema = z.object({
 usersRouter.post(
   "/",
   requirePermission("manageMembers"),
+  memberCreateLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
     const exists = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
-    if (exists) throw new HttpError(409, "A user with that email already exists");
+    if (exists) throw new HttpError(409, "That email address can't be used for a new member. If they already have a Mineral Hub account, invite them with your Team ID instead.");
     const user = await prisma.user.create({
       data: {
         firstName: data.firstName,
@@ -165,6 +180,10 @@ usersRouter.post(
         mustChangePassword: true,
         // Evict the target's live sessions — see User.sessionEpoch.
         sessionEpoch: { increment: 1 },
+        // The second factor goes too. A 2FA enrolled by whoever held a stolen
+        // session (or an authenticator the member lost) was otherwise permanent:
+        // this is the one reset an org owner can run for a locked-out member.
+        totpEnabled: false, totpSecret: null, totpRecoveryCodes: [], totpLastUsedStep: null,
       },
     });
     // Only echo a generated temp password; never echo an owner-supplied one back.

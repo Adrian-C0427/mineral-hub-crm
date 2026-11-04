@@ -122,7 +122,7 @@ const updateSchema = z.object({
   amount: amountField.optional(),
   conditions: z.string().max(2000).nullish(),
   expirationDate: dateField,
-  status: z.enum(["ACTIVE", "ACCEPTED", "REJECTED", "EXPIRED", "COUNTERED", "WITHDRAWN"]).optional(),
+  status: z.enum(["ACTIVE", "ACCEPTED", "REJECTED", "EXPIRED", "COUNTERED", "WITHDRAWN", "PENDING_REVIEW"]).optional(),
   notes: z.string().max(4000).nullish(),
 });
 
@@ -137,10 +137,29 @@ offersRouter.patch(
     if (data.status !== undefined) patch.status = data.status;
     if (data.notes !== undefined) patch.notes = data.notes;
     // Ensure the offer belongs to a deal in the caller's org.
-    const owned = await prisma.offer.findFirst({ where: { id: req.params.id, deal: { organizationId: orgId(req) } }, include: { deal: { select: { id: true, stage: true, selectedOfferId: true } } } });
+    const owned = await prisma.offer.findFirst({ where: { id: req.params.id, deal: { organizationId: orgId(req) } }, include: { deal: { select: { id: true, name: true, stage: true, selectedOfferId: true } }, buyer: { select: { name: true } } } });
     if (!owned) throw new HttpError(404, "Offer not found");
     const offer = await prisma.$transaction(async (tx) => {
       const updated = await tx.offer.update({ where: { id: req.params.id }, data: patch });
+      // Confirming a portal submission (PENDING_REVIEW → any other status) is
+      // the "Offer Made" moment POST / records for an offer typed in: the
+      // buyer's activity reads OFFER_RECEIVED and the org feed gets the entry.
+      if (owned.status === "PENDING_REVIEW" && data.status !== undefined && data.status !== "PENDING_REVIEW") {
+        const now = new Date();
+        await tx.dealBuyerActivity.upsert({
+          where: { dealId_buyerId: { dealId: owned.dealId, buyerId: owned.buyerId } },
+          create: { dealId: owned.dealId, buyerId: owned.buyerId, status: "OFFER_RECEIVED", responseReceived: true, offerAmount: updated.amount, dateSent: now, lastActivityDate: now, sentByUserId: req.user!.id },
+          update: { status: "OFFER_RECEIVED", responseReceived: true, offerAmount: updated.amount, lastActivityDate: now },
+        });
+        await logActivity(
+          {
+            eventType: "OFFER_MADE",
+            summary: `${owned.buyer.name}'s portal offer of $${updated.amount.toLocaleString()} on "${owned.deal.name}" was confirmed`,
+            organizationId: orgId(req), actorUserId: req.user!.id, dealId: owned.dealId, buyerId: owned.buyerId,
+          },
+          tx,
+        );
+      }
       // Amount edits flow into every derived number at read time (best offer,
       // profit estimates, dashboard, reports) — the only STORED copy is the
       // buyer-activity offerAmount, so keep it in sync when this offer is the

@@ -21,6 +21,17 @@ export const mapRouter = Router();
 // Routes that return the org's deals, assets or opportunities (prices, buyers,
 // acreage) also need viewDeals: viewMap alone is the map, not the pipeline.
 mapRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
+// Reads here are heavy — GET /tracts returns the org's whole imported
+// overlay (up to MAX_ORG_TRACT_BYTES of geometry) — and had no ceiling at
+// all. The same per-user bound the research router carries.
+mapRouter.use(rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many map requests. Wait a moment and try again." },
+}));
 
 // "Active" = any non-terminal stage (robust to custom stages).
 const ACTIVE_FILTER = { notIn: [...TERMINAL_STAGE_KEYS] };

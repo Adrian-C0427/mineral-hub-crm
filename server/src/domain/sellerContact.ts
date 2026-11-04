@@ -137,17 +137,21 @@ export function sellerInfoName(s: Pick<SellerInfo, "firstName" | "lastName" | "c
  * A match on name alone with contact details present is NOT taken — two
  * different John Smiths must not be merged because one has an email.
  */
-export async function matchSellerContact(tx: Tx, organizationId: string, s: SellerInfo): Promise<SellerContactRow | null> {
+export async function matchSellerContact(tx: Tx, organizationId: string, s: SellerInfo, opts: { nameMustAgree?: boolean } = {}): Promise<SellerContactRow | null> {
+  const hasName = !!(s.firstName || s.lastName);
+  const sameName = (c: SellerContactRow) =>
+    (hasName && same(c.firstName, s.firstName) && sameMiddle(c.middleName, s.middleName) && same(c.lastName, s.lastName)) || (!!s.companyName && same(c.entityName, s.companyName));
+  // Without "View contacts" an email or phone only links a contact whose name
+  // the caller typed: the reply names the linked contact, so a bare phone
+  // number was a reverse lookup for anyone who may edit deals.
+  const agrees = (c: SellerContactRow) => !opts.nameMustAgree || sameName(c);
   if (s.email) {
     const byEmail = await tx.contact.findFirst({
       where: { organizationId, email: { equals: s.email, mode: "insensitive" } },
       select: sellerContactSelect, orderBy: { updatedAt: "desc" },
     });
-    if (byEmail) return byEmail;
+    if (byEmail && agrees(byEmail)) return byEmail;
   }
-  const hasName = !!(s.firstName || s.lastName);
-  const sameName = (c: SellerContactRow) =>
-    (hasName && same(c.firstName, s.firstName) && sameMiddle(c.middleName, s.middleName) && same(c.lastName, s.lastName)) || (!!s.companyName && same(c.entityName, s.companyName));
   if (s.phone) {
     // Stored phones are digits, but older rows may carry formatting: match on
     // the last 10 digits, then confirm with the full normalization.
@@ -156,7 +160,8 @@ export async function matchSellerContact(tx: Tx, organizationId: string, s: Sell
       where: { organizationId, phone: { contains: tail.slice(0, 3) } },
       select: sellerContactSelect, orderBy: { updatedAt: "desc" }, take: 200,
     })).filter((c) => normalizePhone(c.phone) === s.phone);
-    if (byPhone.length) return byPhone.find(sameName) ?? byPhone[0];
+    const hit = byPhone.find(sameName) ?? (opts.nameMustAgree ? null : byPhone[0]);
+    if (hit) return hit;
   }
   const nameWhere: Prisma.ContactWhereInput[] = [];
   if (hasName) nameWhere.push({ firstName: { equals: s.firstName ?? "", mode: "insensitive" }, lastName: { equals: s.lastName ?? "", mode: "insensitive" } });
@@ -183,14 +188,15 @@ export async function resolveSellerContact(
   tx: Tx,
   organizationId: string,
   s: SellerInfo,
-  opts: { ownerId?: string | null; type?: "SELLER" | "PROSPECT"; notFound: (msg: string) => Error; manage?: boolean },
+  opts: { ownerId?: string | null; type?: "SELLER" | "PROSPECT"; notFound: (msg: string) => Error; manage?: boolean; view?: boolean },
 ): Promise<{ contact: SellerContactRow; created: boolean }> {
   let existing: SellerContactRow | null = null;
   if (s.contactId) {
     existing = await tx.contact.findFirst({ where: { id: s.contactId, organizationId }, select: sellerContactSelect });
     if (!existing) throw opts.notFound("Contact not found in your organization");
   } else {
-    existing = await matchSellerContact(tx, organizationId, s);
+    // `view` false (no "View contacts"): a contact-detail match must also agree on the name.
+    existing = await matchSellerContact(tx, organizationId, s, { nameMustAgree: opts.view === false });
   }
   if (existing) {
     if (opts.manage === false) return { contact: existing, created: false };

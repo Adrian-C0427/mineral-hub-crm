@@ -158,6 +158,7 @@ function toBundle(json: Record<string, unknown>): TokenBundle {
 
 async function tokenRequest(a: OAuthApp, body: Record<string, string>): Promise<TokenBundle> {
   const res = await fetch(a.tokenUrl, {
+    signal: AbortSignal.timeout(20_000),
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: new URLSearchParams({ client_id: a.clientId, client_secret: a.clientSecret, ...body }),
