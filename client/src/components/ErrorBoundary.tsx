@@ -23,7 +23,6 @@ interface State { error: Error | null }
 
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
-
   static getDerivedStateFromError(error: Error): State {
     return { error };
   }
@@ -50,6 +49,16 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      // A stale chunk after a redeploy reloads the page (componentDidCatch runs
+      // right after this render). Until the reload lands, show a quiet
+      // "updating" state — not the error panel, which used to flash "Something
+      // went wrong" for the half-second before the reload and read as an app
+      // failure. Only a chunk that still fails AFTER the reload shows the panel.
+      if (isChunkError(this.state.error)) {
+        let reloaded = false;
+        try { reloaded = sessionStorage.getItem(RELOAD_FLAG) === "1"; } catch { /* storage off */ }
+        if (!reloaded) return <div className="spinner" role="status">Updating to the latest version…</div>;
+      }
       return (
         <div className="panel" style={{ margin: 24, maxWidth: 520 }}>
           <h3 style={{ marginTop: 0 }}>Something went wrong loading this page</h3>

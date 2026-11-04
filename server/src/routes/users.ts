@@ -4,7 +4,7 @@ import { prisma } from "../db.js";
 import { hashPassword } from "../auth/password.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import crypto from "node:crypto";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, invalidateSessionUser, type AuthedRequest } from "../middleware/auth.js";
 import { demoReadOnly } from "../middleware/demo.js";
 import { normalizePhone } from "../domain/phone.js";
 import { rotateTeamId, revokeInvitesKnownTo } from "../services/org.js";
@@ -122,6 +122,7 @@ usersRouter.patch(
       data: patch,
       select: { id: true, name: true, email: true, role: true, status: true },
     });
+    invalidateSessionUser(req.params.id);
     res.json(user);
   }),
 );
@@ -167,6 +168,7 @@ usersRouter.post(
         sessionEpoch: { increment: 1 },
       },
     });
+    invalidateSessionUser(target.id);
     // Only echo a generated temp password; never echo an owner-supplied one back.
     res.json({ ok: true, ...(mode === "temp" ? { temporaryPassword } : {}) });
   }),
@@ -195,6 +197,7 @@ usersRouter.delete(
         where: { id: req.params.id },
         data: { organizationId: null, orgRole: null, sessionEpoch: { increment: 1 } },
       });
+      invalidateSessionUser(req.params.id);
       const invitesRevoked = await revokeInvitesKnownTo(orgId(req), target, tx);
       return { teamId: await rotateTeamId(orgId(req), tx), invitesRevoked };
     });

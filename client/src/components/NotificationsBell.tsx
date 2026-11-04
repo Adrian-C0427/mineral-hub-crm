@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { fmtDateTime } from "../lib/format";
 import { ConfirmDialog } from "./ui";
 
@@ -56,7 +57,7 @@ export function NotificationsBell() {
   const nav = useNavigate();
 
   const load = () =>
-    api.get<{ notifications: Notification[]; unread: number }>("/notifications")
+    fetchQuery<{ notifications: Notification[]; unread: number }>("/notifications", { force: true })
       .then((d) => { setItems(d.notifications); setUnread(d.unread); })
       .catch(() => {});
 

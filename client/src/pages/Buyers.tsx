@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { fetchQuery, useQuery } from "../lib/queryCache";
 import { Spinner, Banner, SearchInput, Modal, Req } from "../components/ui";
 import { Select } from "../components/Select";
 import { Segmented, Tag } from "../components/kit";
@@ -67,7 +68,8 @@ function FocusChips({ value, counties }: { value: string; counties?: string[] })
 
 export function Buyers() {
   const { can } = useAuth();
-  const [buyers, setBuyers] = useState<BuyerRow[] | null>(null);
+  const buyersQ = useQuery<BuyerRow[]>("/buyers");
+  const buyers = buyersQ.data ?? null;
   const [showImport, setShowImport] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [users, setUsers] = useState<UserLite[]>([]);
@@ -79,8 +81,8 @@ export function Buyers() {
   const [q, setQ] = useListState("buyers:q", "");
   const [rel, setRel] = useListState("buyers:rel", "");
 
-  function load() { api.get<BuyerRow[]>("/buyers").then(setBuyers); }
-  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  const load = () => { void buyersQ.reload(); };
+  useEffect(() => { fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
 
   const filtered = useMemo(() => {
     if (!buyers) return [];

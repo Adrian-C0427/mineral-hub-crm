@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { fetchQuery, peekQuery, useQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Modal, Banner, SearchInput, ConfirmDelete, Req, showToast, CtPill } from "../components/ui";
 import { StatStrip, Segmented, Tag, FormSection } from "../components/kit";
@@ -145,7 +146,8 @@ function ListsFilter({ lists, value, onChange, canManage, onManage }: {
 
 export function Contacts() {
   const { can } = useAuth();
-  const [rows, setRows] = useState<ContactRow[] | null>(null);
+  const rowsQ = useQuery<ContactRow[]>("/contacts");
+  const rows = rowsQ.error ? [] : rowsQ.data ?? null;
   const [users, setUsers] = useState<UserLite[]>([]);
   // Search + filters are remembered per tab so Back from a contact restores them.
   const [q, setQ] = useListState("contacts:q", "");
@@ -161,9 +163,9 @@ export function Contacts() {
   const canManage = can("manageContacts");
   const nav = useNavigate();
 
-  const load = () => api.get<ContactRow[]>("/contacts").then(setRows).catch(() => setRows([]));
-  const loadLists = () => api.get<ContactListRow[]>("/contacts/lists/all").then(setLists).catch(() => {});
-  useEffect(() => { load(); loadLists(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  const load = () => rowsQ.reload();
+  const loadLists = () => fetchQuery<ContactListRow[]>("/contacts/lists/all", { force: true }).then(setLists).catch(() => {});
+  useEffect(() => { const cached = peekQuery<ContactListRow[]>("/contacts/lists/all"); if (cached) setLists(cached); loadLists(); fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
 
   const filtered = useMemo(() => {
     let out = rows ?? [];

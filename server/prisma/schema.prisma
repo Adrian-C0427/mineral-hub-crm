@@ -2,7 +2,11 @@
 // Ships with an EMPTY database (one bootstrapped Owner user via CLI). No seed data.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // relationJoins: lets a read with `include` run as ONE SQL statement
+  // (relationLoadStrategy: "join") instead of one query per relation — the
+  // deals list was nine sequential round trips to Neon.
+  previewFeatures = ["relationJoins"]
 }
 
 // `url` is the RUNTIME connection and should point at Neon's *pooled*

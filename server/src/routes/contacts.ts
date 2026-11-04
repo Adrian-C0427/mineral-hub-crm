@@ -118,6 +118,7 @@ contactsRouter.get(
   requirePermission("viewContacts"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const rows = await prisma.contact.findMany({
+      relationLoadStrategy: "join",
       where: { organizationId: orgId(req) },
       include: ownerInclude,
       orderBy: { createdAt: "desc" },

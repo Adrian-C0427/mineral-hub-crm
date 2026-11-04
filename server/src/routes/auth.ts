@@ -8,7 +8,7 @@ import { prisma, withDbRetry } from "../db.js";
 import { verifyPassword, hashPassword, dummyVerifyPassword } from "../auth/password.js";
 import { signSession, setSessionCookie, clearSessionCookie } from "../auth/session.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, canSeeTeamId, invalidateSessionUser, type AuthedRequest } from "../middleware/auth.js";
 import { forbidDemo } from "../middleware/demo.js";
 import { LOGIN_RATE_LIMIT, env, isProd, emailConfigured } from "../config.js";
 import { createOrganization, resolveJoinToken, consumeInvite } from "../services/org.js";
@@ -638,6 +638,7 @@ authRouter.post(
         sessionEpoch: { increment: 1 },
       },
     });
+    invalidateSessionUser(user.id);
     res.json({ ok: true, ...issueSession(res, updated) });
   }),
 );
@@ -734,6 +735,7 @@ authRouter.post(
         where: { id: row.userId },
         data: { passwordHash, sessionEpoch: { increment: 1 }, emailVerifiedAt: now },
       });
+      invalidateSessionUser(row.userId);
       // Invalidate any other outstanding tokens for this user.
       await tx.passwordResetToken.updateMany({
         where: { userId: row.userId, usedAt: null, id: { not: row.id } },

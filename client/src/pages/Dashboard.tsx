@@ -4,6 +4,7 @@ import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../api/client";
+import { fetchQuery, peekQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { Modal, Spinner, StageBadge, showToast } from "../components/ui";
 import { ApiError } from "../api/client";
@@ -304,7 +305,7 @@ export function Dashboard() {
   // Teammates: the Tasks widget's filter/assignee lists, and matching the
   // actor at the start of an activity line.
   const [users, setUsers] = useState<UserRef[]>([]);
-  useEffect(() => { api.get<UserRef[]>("/users").then(setUsers).catch(() => {}); }, []);
+  useEffect(() => { fetchQuery<UserRef[]>("/users").then(setUsers).catch(() => {}); }, []);
   // A task opened from a notification (or a standalone task's row) —
   // `?task=<id>` in the URL, so the link is shareable and survives reloads.
   const [params, setParams] = useSearchParams();
@@ -338,8 +339,12 @@ export function Dashboard() {
     // Only the latest selection may update the page: a slower response for a
     // period the user already left must not land on top of the newer one.
     let live = true;
+    const path = `/dashboard?${qs.toString()}`;
+    // A revisit paints the last response at once; the fresh one lands behind it.
+    const cached = peekQuery<DashboardData>(path);
+    if (cached) { setD(cached); setLoadedRange(range); setDenied(false); }
     const load = () => {
-      void api.get<DashboardData>(`/dashboard?${qs.toString()}`)
+      void fetchQuery<DashboardData>(path, { force: true })
         .then((data) => { if (!live) return; setD(data); setLoadedRange(range); setDenied(false); })
         .catch((e) => { if (live && e instanceof ApiError && e.status === 403) setDenied(true); });
     };

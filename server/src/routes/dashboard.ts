@@ -209,18 +209,24 @@ dashboardRouter.get(
     const IN_PIPELINE = { OR: [{ recordType: "OPPORTUNITY" as const }, { recordType: "OWNED_ASSET" as const, assetMode: "SELL" as const }] };
     // Active = any non-terminal stage. The stage distribution uses the org's own
     // ordered active stages (custom pipeline).
-    const activeStageKeys = (await ensureStages(prisma, org)).filter((s) => !s.isTerminal).map((s) => s.key);
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    // Every read the page needs, in ONE round of concurrent queries (each a
+    // single statement thanks to relationJoins). They used to run one after
+    // another — seven sequential trips to the database on every open.
     // Retry only transient Neon reconnect blips (P1001/P1017) on this hot,
     // authenticated read batch (Sentry MINERAL-HUB-API-6). Happy path unchanged.
-    const [allActive, closedDeals, activeOffers] = await withDbRetry(() =>
+    const [stages, allActive, closedDeals, activeOffers, followUps, recent, pipelineHistory, offersRecent, dueSoonTasks] = await withDbRetry(() =>
       Promise.all([
+        ensureStages(prisma, org),
         // The deal's Extend records are its persisted extension status
         // (closingIsExtended) — they decide which closing month its profit lands on.
         prisma.deal.findMany({
+          relationLoadStrategy: "join",
           where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: org, ...IN_PIPELINE },
           include: { ...dealInclude, offers: true, contractExtensions: { select: { id: true } } },
         }),
         prisma.deal.findMany({
+          relationLoadStrategy: "join",
           where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
           include: { ...dealInclude, selectedOffer: true },
         }),
@@ -228,8 +234,42 @@ dashboardRouter.get(
         // yet. Once a deal selects its offer, the losing ACTIVE offers are no
         // longer pending decisions and must drop out of the KPI.
         prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, selectedOfferId: null, ...IN_PIPELINE } } }),
+        // Upcoming follow-ups (from buyer activity nextFollowUpDate)
+        prisma.dealBuyerActivity.findMany({
+          relationLoadStrategy: "join",
+          where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org, recordType: "OPPORTUNITY" } },
+          orderBy: { nextFollowUpDate: "asc" },
+          take: 10,
+          include: { buyer: { select: { name: true } }, deal: { select: { name: true } } },
+        }),
+        // Recent activity feed — business events only. Integration plumbing events
+        // (connect/disconnect/test) stay in the audit log but would be noise here.
+        prisma.activityLog.findMany({
+          where: { organizationId: org, NOT: { eventType: { startsWith: "integration." } } },
+          orderBy: { createdAt: "desc" },
+          take: 15,
+        }),
+        // Active deals over the last 8 weeks: a deal counts as active from creation
+        // until its FIRST Closed/Dead transition. (A re-opened deal approximates as
+        // inactive after that first exit — fine for a trend line.)
+        prisma.deal.findMany({
+          relationLoadStrategy: "join",
+          where: { organizationId: org, ...IN_PIPELINE },
+          select: {
+            createdAt: true,
+            stageHistory: { where: { toStage: { in: ["CLOSED", "DEAD"] } }, orderBy: { createdAt: "asc" }, take: 1, select: { createdAt: true } },
+          },
+        }),
+        // Offers RECEIVED per week (pending-status history isn't stored, so the
+        // honest series for the offers card is submission volume).
+        prisma.offer.findMany({
+          where: { deal: { organizationId: org, ...IN_PIPELINE }, dateSubmitted: { gte: new Date(now.getTime() - 8 * weekMs) } },
+          select: { dateSubmitted: true },
+        }),
+        dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), canManageTasks(req), canViewContacts(req), now),
       ]),
     );
+    const activeStageKeys = stages.filter((s) => !s.isTerminal).map((s) => s.key);
 
     // Projected and at-asking profit land on the deal's Closing date — the
     // Extended closing ONLY once the closing was explicitly extended (Extend
@@ -305,21 +345,6 @@ dashboardRouter.get(
     for (const d of allActive) stageCountMap.set(d.stage, (stageCountMap.get(d.stage) ?? 0) + 1);
     const stageCounts = activeStageKeys.map((stage) => ({ stage, count: stageCountMap.get(stage) ?? 0 }));
 
-    // Upcoming follow-ups (from buyer activity nextFollowUpDate)
-    const followUps = await prisma.dealBuyerActivity.findMany({
-      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org, recordType: "OPPORTUNITY" } },
-      orderBy: { nextFollowUpDate: "asc" },
-      take: 10,
-      include: { buyer: { select: { name: true } }, deal: { select: { name: true } } },
-    });
-
-    // Recent activity feed — business events only. Integration plumbing events
-    // (connect/disconnect/test) stay in the audit log but would be noise here.
-    const recent = await prisma.activityLog.findMany({
-      where: { organizationId: org, NOT: { eventType: { startsWith: "integration." } } },
-      orderBy: { createdAt: "desc" },
-      take: 15,
-    });
 
     // Top buyers by closed volume within the selected window
     const topBuyersMap = new Map<string, { name: string; companyName: string; volume: number }>();
@@ -381,19 +406,8 @@ dashboardRouter.get(
     }));
 
     // --- KPI trends (sparkline series — real history, never fabricated) ------
-    const weekMs = 7 * 24 * 3600 * 1000;
     const weekMarks = Array.from({ length: 8 }, (_, i) => new Date(now.getTime() - (7 - i) * weekMs));
 
-    // Active deals over the last 8 weeks: a deal counts as active from creation
-    // until its FIRST Closed/Dead transition. (A re-opened deal approximates as
-    // inactive after that first exit — fine for a trend line.)
-    const pipelineHistory = await prisma.deal.findMany({
-      where: { organizationId: org, ...IN_PIPELINE },
-      select: {
-        createdAt: true,
-        stageHistory: { where: { toStage: { in: ["CLOSED", "DEAD"] } }, orderBy: { createdAt: "asc" }, take: 1, select: { createdAt: true } },
-      },
-    });
     const activeDealsWeekly = weekMarks.map(
       (t) => pipelineHistory.filter((d) => d.createdAt <= t && !(d.stageHistory[0] && d.stageHistory[0].createdAt <= t)).length,
     );
@@ -416,18 +430,10 @@ dashboardRouter.get(
       return closedDeals.filter((d) => d.originalClosingDate && d.originalClosingDate > from && d.originalClosingDate <= t).length;
     });
 
-    // Offers RECEIVED per week (pending-status history isn't stored, so the
-    // honest series for the offers card is submission volume).
-    const offersRecent = await prisma.offer.findMany({
-      where: { deal: { organizationId: org, ...IN_PIPELINE }, dateSubmitted: { gte: new Date(now.getTime() - 8 * weekMs) } },
-      select: { dateSubmitted: true },
-    });
     const offersWeekly = weekMarks.map((t, i) => {
       const from = i === 0 ? new Date(t.getTime() - weekMs) : weekMarks[i - 1];
       return offersRecent.filter((o) => o.dateSubmitted > from && o.dateSubmitted <= t).length;
     });
-
-    const dueSoonTasks = await dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), canManageTasks(req), canViewContacts(req), now);
 
     res.json({
       metrics: {

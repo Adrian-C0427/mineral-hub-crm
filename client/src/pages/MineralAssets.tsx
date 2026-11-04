@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { fetchQuery, useQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, SearchInput, ChipList } from "../components/ui";
 import { StatStrip, Segmented, Tag } from "../components/kit";
@@ -64,7 +65,8 @@ const leaseExpired = (d: DealSummary) => !!d.leaseExpirationDate && d.leaseExpir
 export function MineralAssets() {
   const { can } = useAuth();
   const nav = useNavigate();
-  const [assets, setAssets] = useState<DealSummary[] | null>(null);
+  const assetsQ = useQuery<DealSummary[]>("/deals?recordType=OWNED_ASSET");
+  const assets = assetsQ.data ?? null;
   // ?new=1 opens the create form on arrival (same convention as Deals).
   const [params, setParams] = useSearchParams();
   const [showNew, setShowNew] = useState(params.get("new") === "1");
@@ -77,8 +79,8 @@ export function MineralAssets() {
   const sel = useRowSelection();
   const closeNew = () => { setShowNew(false); if (params.get("new")) setParams({}, { replace: true }); };
 
-  const load = () => api.get<DealSummary[]>("/deals?recordType=OWNED_ASSET").then(setAssets);
-  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  const load = () => assetsQ.reload();
+  useEffect(() => { fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
   usePageScrollRestore("assets", assets != null);
 
   const scoped = useMemo(() => (assets ?? []).filter((d) => inScope(d, scope)), [assets, scope]);

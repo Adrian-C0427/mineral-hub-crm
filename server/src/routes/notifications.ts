@@ -59,12 +59,15 @@ notificationsRouter.get(
     const unreadOnly = req.query.unread === "1";
     const muted = await mutedTypesFor(req.user!.id);
     const mutedFilter = muted.length ? { type: { notIn: muted } } : {};
-    const rows = await prisma.notification.findMany({
-      where: { ...visibleWhere(req), ...mutedFilter, ...(unreadOnly ? { readAt: null } : {}) },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
-    const unread = await prisma.notification.count({ where: { ...visibleWhere(req), ...mutedFilter, readAt: null } });
+    // The list and the unread count are independent reads: one round trip, not two.
+    const [rows, unread] = await Promise.all([
+      prisma.notification.findMany({
+        where: { ...visibleWhere(req), ...mutedFilter, ...(unreadOnly ? { readAt: null } : {}) },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+      prisma.notification.count({ where: { ...visibleWhere(req), ...mutedFilter, readAt: null } }),
+    ]);
     // Who else has cleared a shared row is not the caller's business.
     res.json({ notifications: rows.map(({ hiddenForUserIds: _hidden, ...n }) => n), unread });
   }),

@@ -9,6 +9,7 @@ import { SellerInformation, emptySellerInfo, sellerInfoBody, sellerInfoFromConta
 import { SectionRail, useSectionRail, type RailSection } from "./SectionRail";
 import { useAbstractIndex } from "./AbstractPicker";
 import { api, ApiError } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { useAuth } from "../auth/AuthContext";
 import { isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { acres, prettyStage } from "../lib/format";
@@ -97,7 +98,7 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
 
   // --- people -------------------------------------------------------------
   const [users, setUsers] = useState<UserLite[]>([]);
-  useEffect(() => { api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  useEffect(() => { fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
   // The saved owner shows by name before (or without) the list (edit mode).
   const ownerList: UserRef[] = opp?.owner && !users.some((u) => u.id === opp.owner!.id) ? [opp.owner, ...users] : users;
   const ownerOptions = userOptions(ownerList);

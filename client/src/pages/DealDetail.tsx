@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { fetchQuery } from "../lib/queryCache";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -98,7 +99,7 @@ export function DealDetail() {
 
   useEffect(() => {
     loadDeal(); loadMatches();
-    api.get<UserLite[]>("/users").then(setUsers).catch(() => {});
+    fetchQuery<UserLite[]>("/users").then(setUsers).catch(() => {});
   }, [loadDeal, loadMatches]);
 
   if (!deal) return <Spinner />;

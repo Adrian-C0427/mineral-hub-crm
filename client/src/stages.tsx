@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
+import { fetchQuery } from "./lib/queryCache";
 import { useAuth } from "./auth/AuthContext";
 import { prettyStage } from "./lib/format";
 import type { ConvertMode, PipelineKind, PipelineStage } from "./types";
@@ -113,7 +114,7 @@ export function StagesProvider({ children }: { children: ReactNode }) {
   const load = useCallback(() => {
     const forAccount = accountRef.current;
     if (!forAccount) return;
-    api.get<PipelineInfo[]>("/pipeline/pipelines")
+    fetchQuery<PipelineInfo[]>("/pipeline/pipelines")
       .then((ps) => { if (accountRef.current === forAccount && ps.length) setPipelines(ps); })
       .catch(() => { /* keep what we have */ });
   }, []);
