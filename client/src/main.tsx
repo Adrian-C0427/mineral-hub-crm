@@ -15,6 +15,7 @@ import "./styles/auth.css";
 import "./styles/dashboard.css";
 import "./styles/deals.css";
 import "./styles/deal-detail.css";
+import "./styles/buyer-matches.css";
 import "./styles/pipeline.css";
 import "./styles/buyers-contacts.css";
 import "./styles/map-assets.css";

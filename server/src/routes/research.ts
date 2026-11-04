@@ -15,6 +15,7 @@ import { fieldsFor, guessMapping, sourceFor } from "../domain/researchSources.js
 // CLI importer (scripts/importRecords.ts) so both paths dedup and normalize
 // identically. See domain/researchIngest.ts.
 import { ingestResearchCsv, parseCsv, resolveCategory } from "../domain/researchIngest.js";
+import { invalidateBuyerMatchCaches } from "../services/buyerMatching.js";
 import {
   buildResearchBuyer, classifyMatch, mergePlan, summaryFor,
   type ExistingBuyerLite, type ResearchDocLite,
@@ -1925,6 +1926,8 @@ researchRouter.post(
       prisma, organizationId: orgId(req), createdByUserId: req.user!.id,
       category, csv, mapping, filename, assignedState, assignedCounty, reviewedTransfers,
     });
+    // New deed records change where buyers have bought: buyer matching rebuilds.
+    invalidateBuyerMatchCaches();
     res.json(summary);
   }),
 );
@@ -2019,6 +2022,7 @@ researchRouter.delete(
     let documents = 0, permits = 0;
     if (!kind || kind === "DOCUMENTS") documents = (await prisma.researchDocument.deleteMany({ where: scope })).count;
     if (!kind || kind === "PERMITS") permits = (await prisma.researchPermit.deleteMany({ where: scope })).count;
+    if (documents) invalidateBuyerMatchCaches();
     res.json({ documents, permits });
   }),
 );
@@ -2040,6 +2044,7 @@ researchRouter.post(
       prisma.researchPermit.deleteMany({ where: scope }),
     ]);
     await prisma.researchIngestRun.deleteMany({ where: { id: { in: runIds }, organizationId: org } });
+    if (documents.count) invalidateBuyerMatchCaches();
     res.json({ runs: runIds.length, documents: documents.count, permits: permits.count });
   }),
 );

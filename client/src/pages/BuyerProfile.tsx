@@ -15,11 +15,13 @@ import { StateSelect } from "../components/StateSelect";
 import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelationships";
 import { BuyerAliasManager } from "../components/BuyerAliasManager";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { LEASE_STATUS_OPTIONS } from "../lib/assetOptions";
+import { ROYALTY_RATE_OPTIONS, royaltyLabel, royaltyValue } from "../lib/royalty";
 import { money, pct, acres, fmtDate } from "../lib/format";
 import { sumMoney } from "../lib/money";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
-import type { BuyBox, Relationship, UserLite, UserRef } from "../types";
+import type { BuyBox, BuyBoxKey, Relationship, UserLite, UserRef } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { useUnsavedSection, guarded } from "../lib/unsaved";
 import { LinkedFilesPanel } from "../components/CloudLinks";
@@ -56,6 +58,15 @@ const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "assetTypes"];
 const BUYBOX_LABELS: Partial<Record<keyof BuyBox, string>> = {
   states: "States", counties: "Counties", assetTypes: "Asset types",
 };
+/** Criteria a buyer can mark as hard requirements (server domain/buyerMatch.ts keys). */
+const STRICT_OPTIONS: [BuyBoxKey, string][] = [
+  ["state", "State"], ["county", "County"], ["assetType", "Asset type"], ["acreage", "Acreage (NMA)"], ["nra", "NRA"],
+  ["price", "Deal size"], ["pricePerNma", "Price per NMA"], ["leaseStatus", "Lease status"], ["operator", "Operator"], ["royalty", "Royalty rate"],
+];
+const STRICT_LABEL: Record<string, string> = Object.fromEntries(STRICT_OPTIONS);
+/** The preset fraction a stored decimal royalty came from ("" when it is not one of the presets). */
+const royaltyOptionFor = (v: number | null | undefined): string =>
+  v == null ? "" : ROYALTY_RATE_OPTIONS.find((r) => Math.abs((royaltyValue(r) ?? -1) - v) < 1e-6) ?? "";
 
 /** Human range: both bounds → "a – b", one bound → "500+ " / "up to 500", none → "Any". */
 function fmtRange(min: number | null, max: number | null, fmt: (n: number) => string): string {
@@ -336,13 +347,50 @@ export function BuyerProfile() {
               </Fld>
               <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} placeholder="Any" /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} placeholder="Any" /></Fld></Row>
               <Row><Fld l="Min price"><MoneyInput value={view.buyBox.minPrice != null ? String(view.buyBox.minPrice) : ""} onChange={(v) => setBox("minPrice", v === "" ? null : Number(v))} ariaLabel="Minimum price" /></Fld><Fld l="Max price"><MoneyInput value={view.buyBox.maxPrice != null ? String(view.buyBox.maxPrice) : ""} onChange={(v) => setBox("maxPrice", v === "" ? null : Number(v))} ariaLabel="Maximum price" /></Fld></Row>
+              <Row><Fld l="Min NRA"><input type="number" value={view.buyBox.minNra ?? ""} onChange={(e) => setBox("minNra", e.target.value === "" ? null : Number(e.target.value))} placeholder="Any" /></Fld><Fld l="Max NRA"><input type="number" value={view.buyBox.maxNra ?? ""} onChange={(e) => setBox("maxNra", e.target.value === "" ? null : Number(e.target.value))} placeholder="Any" /></Fld></Row>
+              <Row>
+                <Fld l="Max price per NMA"><MoneyInput value={view.buyBox.maxPricePerNma != null ? String(view.buyBox.maxPricePerNma) : ""} onChange={(v) => setBox("maxPricePerNma", v === "" ? null : Number(v))} ariaLabel="Maximum price per net mineral acre" /></Fld>
+                <Fld l="Min royalty rate">
+                  <select value={royaltyOptionFor(view.buyBox.minRoyalty)} onChange={(e) => setBox("minRoyalty", e.target.value ? royaltyValue(e.target.value) : null)} aria-label="Minimum royalty rate">
+                    <option value="">Any</option>
+                    {ROYALTY_RATE_OPTIONS.map((r) => <option key={r} value={r}>{royaltyLabel(r)}</option>)}
+                  </select>
+                </Fld>
+              </Row>
+              <Fld l="Lease statuses">
+                <SearchableMultiSelect options={[...LEASE_STATUS_OPTIONS]} value={view.buyBox.leaseStatuses ?? []} onChange={(v) => setBox("leaseStatuses", v)} placeholder="Any lease status…" />
+              </Fld>
+              <Fld l="Operators they follow">
+                <SearchableMultiSelect options={view.buyBox.operators ?? []} value={view.buyBox.operators ?? []} onChange={(v) => setBox("operators", v)} placeholder="Type an operator name…" creatable />
+              </Fld>
+              <div className="field">
+                <label>Hard requirements</label>
+                <div className="bp-strict" role="group" aria-label="Criteria the buyer treats as hard requirements">
+                  {STRICT_OPTIONS.map(([key, label]) => (
+                    <label key={key} className="bp-strict-opt">
+                      <input type="checkbox" checked={(view.buyBox.strictKeys ?? []).includes(key)}
+                        onChange={(e) => setBox("strictKeys", e.target.checked ? [...(view.buyBox.strictKeys ?? []), key] : (view.buyBox.strictKeys ?? []).filter((k) => k !== key))} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>A deal that fails a hard requirement is marked ineligible for this buyer. Everything else only moves the match score.</div>
+              </div>
+              <Fld l="Buy box notes"><textarea rows={2} value={view.buyBox.notes ?? ""} onChange={(e) => setBox("notes", e.target.value || null)} placeholder="Anything else the buyer has said about what they buy" /></Fld>
             </div>
           ) : (
             <div className="bp-kv-grid">
               {/* Friendly display names — the raw key rendered "ASSETTYPES". */}
               {ARRAY_KEYS.map((k) => <KV key={k} k={BUYBOX_LABELS[k] ?? k} v={(view.buyBox[k] as string[]).length ? <ChipList items={view.buyBox[k] as string[]} /> : null} />)}
-              <KV k="Acreage" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => acres(n))} />
-              <KV k="Price" v={fmtRange(view.buyBox.minPrice, view.buyBox.maxPrice, (n) => money(n))} />
+              <KV k="Acreage (NMA)" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => acres(n))} />
+              <KV k="NRA" v={fmtRange(view.buyBox.minNra ?? null, view.buyBox.maxNra ?? null, (n) => acres(n))} />
+              <KV k="Deal size" v={fmtRange(view.buyBox.minPrice, view.buyBox.maxPrice, (n) => money(n))} />
+              <KV k="Max price per NMA" v={view.buyBox.maxPricePerNma != null ? money(view.buyBox.maxPricePerNma) : null} />
+              <KV k="Min royalty" v={view.buyBox.minRoyalty != null ? royaltyLabel(royaltyOptionFor(view.buyBox.minRoyalty) || `${view.buyBox.minRoyalty * 100}%`) : null} />
+              <KV k="Lease statuses" v={(view.buyBox.leaseStatuses ?? []).length ? <ChipList items={view.buyBox.leaseStatuses} /> : null} />
+              <KV k="Operators" v={(view.buyBox.operators ?? []).length ? <ChipList items={view.buyBox.operators} /> : null} />
+              <KV k="Hard requirements" v={(view.buyBox.strictKeys ?? []).length ? <ChipList items={view.buyBox.strictKeys.map((k) => STRICT_LABEL[k] ?? k)} /> : null} />
+              <KV k="Notes" v={view.buyBox.notes} />
             </div>
           )}
         </div>

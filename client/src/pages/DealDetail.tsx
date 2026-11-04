@@ -14,6 +14,7 @@ import { useUnsavedSection } from "../lib/unsaved";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
+import { BuyerMatches } from "../components/BuyerMatches";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { useAbstractLabels } from "../components/AbstractPicker";
@@ -109,10 +110,6 @@ export function DealDetail() {
   // here exactly as Contacted does.
   const hasUnresolved = deal.buyerActivity.some((a) => (a.status === "CONTACTED" || a.status === "NO_RESPONSE") && !a.responseReceived);
 
-  const toggleMatch = (buyerId: string) =>
-    setSelected((prev) => { const n = new Set(prev); n.has(buyerId) ? n.delete(buyerId) : n.add(buyerId); return n; });
-  const selectAllMatches = () =>
-    setSelected((prev) => (matches && prev.size === matches.length ? new Set() : new Set((matches ?? []).map((m) => m.buyerId))));
   async function markContacted() {
     if (selected.size === 0) return;
     await api.post(`/deals/${id}/contact-bulk`, { buyerIds: [...selected] });
@@ -123,8 +120,8 @@ export function DealDetail() {
     const chosen = (matches ?? []).filter((m) => selected.has(m.buyerId));
     downloadCsv(
       `matches-${deal!.name}-${new Date().toISOString().slice(0, 10)}.csv`,
-      ["Rank", "Buyer", "Company", "Match %", "Owners", "Closed together", "Last contact"],
-      chosen.map((m) => [m.rank, m.buyerName, m.companyName, m.matchPercent, m.owners.join("; "), m.previousDealsClosed, m.lastContactDate ?? ""]),
+      ["Rank", "Buyer", "Company", "Match score", "Confidence", "Eligible", "Why", "Nearest acquisition (mi)", "Last acquisition", "Owners", "Closed together", "Last contact"],
+      chosen.map((m) => [m.rank, m.buyerName, m.companyName, m.score ?? "", m.confidence, m.eligible ? "yes" : "no", m.highlights.join(" | "), m.facts.nearestAcquisitionMiles ?? "", m.facts.lastAcquisitionDate ?? "", m.owners.join("; "), m.previousDealsClosed, m.lastContactDate ?? ""]),
     );
   }
 
@@ -361,77 +358,21 @@ export function DealDetail() {
       <CollapsibleSection
         defaultOpen
         title="Buyer matches"
-        sub="Ranked, every buyer, highest match first"
+        sub="Every buyer, ranked by where they buy, their buy box, activity and our history with them"
         right={matches ? <span className="dd-card-count">{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}
       >
-        {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted mr-none">No buyers in the system yet.</p> : (
-          <>
-            {can("editDeals") && (
-              <div className="mr-bulk">
-                <label className="mr-selall">
-                  <input type="checkbox" checked={selected.size > 0 && selected.size === matches.length} onChange={selectAllMatches} /> Select all
-                </label>
-                <span className="mr-selcount">{selected.size} selected</span>
-                <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send deal by email</button>
-                <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark as contacted</button>
-                <button className="small" disabled={selected.size === 0} onClick={exportSelected}>Export selected (CSV)</button>
-                {selected.size > 0 && <button className="link-btn mr-deselect" onClick={() => setSelected(new Set())}>Deselect all</button>}
-              </div>
-            )}
-            <div className="mr-list">
-            {(showAllMatches ? matches : matches.slice(0, 6)).map((m) => {
-              const ring = 2 * Math.PI * 14;
-              const ringTone = m.matchPercent >= 70 ? "success" : m.matchPercent >= 55 ? "warn" : "low";
-              return (
-              <div className={`match-card ${selected.has(m.buyerId) ? "match-selected" : ""}`} key={m.buyerId}>
-                {can("editDeals") && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => toggleMatch(m.buyerId)} aria-label={`Select ${m.companyName || m.buyerName}`} />}
-                <span className="match-rank">#{m.rank}</span>
-                {/* Score ring: circular progress with the % inside. */}
-                <span className={`mr-ring ${ringTone}`} aria-label={`${m.matchPercent}% match`}>
-                  <svg width="36" height="36" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="14" fill="none" className="mr-ring-track" strokeWidth="3" />
-                    <circle cx="18" cy="18" r="14" fill="none" className="mr-ring-val" strokeWidth="3" strokeLinecap="round"
-                      strokeDasharray={`${((ring * m.matchPercent) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 18 18)" />
-                  </svg>
-                  <span className="mr-ring-n">{m.matchPercent}</span>
-                </span>
-                <div className="mr-main">
-                  <div className="mr-title">
-                    {/* Company name only — the primary identifier when evaluating matches.
-                        Contact person is available on the Buyer Profile. */}
-                    <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
-                    {m.matchPercent >= 70 && m.criteriaSpecified >= 4 && <Tag tone="success" dot>Strong fit</Tag>}
-                    {m.lastContactDate && <span className="mr-contacted">Contacted</span>}
-                    <span className="mr-crit" title="How many buy-box criteria this buyer has set, and how many this deal matches">
-                      {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria met` : "no buy box set"}
-                    </span>
-                  </div>
-                  <div className="mr-meta">
-                    Owner(s): {m.owners.length ? <ChipList items={m.owners} max={3} /> : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
-                    {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
-                    {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}
-                  </div>
-                  <div className="mr-tags">
-                    {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
-                    {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
-                  </div>
-                </div>
-                {can("editDeals") && <button className="small match-log" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
-              </div>
-              );
-            })}
-            </div>
-            <div className="mr-foot">
-              <span className="mr-legend"><i className="yes" />In buy box</span>
-              <span className="mr-legend"><i />Not in buyer's buy box</span>
-              {matches.length > 6 && (
-                <button className="small mr-more" onClick={() => setShowAllMatches((v) => !v)}>
-                  {showAllMatches ? "Show top 6" : `Show all ${matches.length} buyers`}
-                </button>
-              )}
-            </div>
-          </>
-        )}
+        <BuyerMatches
+          dealId={deal.id}
+          matches={matches}
+          canEdit={can("editDeals")}
+          selected={selected}
+          onSelectedChange={setSelected}
+          onSendEmail={() => setShowEmail(true)}
+          onMarkContacted={markContacted}
+          onExport={exportSelected}
+          onLogContact={(b) => setLogBuyer({ id: b.id, name: b.name })}
+          onChanged={loadMatches}
+        />
       </CollapsibleSection>
       {/* Emails with this deal's buyers (sent from the CRM or filed from Outlook). */}
       <RecordEmails record={{ type: "deal", id: deal.id }} name={deal.name} />

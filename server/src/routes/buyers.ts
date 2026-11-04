@@ -15,6 +15,8 @@ import { normalizeEntity, parsePartyCell } from "../domain/research.js";
 import { entityNetwork, expandDocToEdges, sideParties, ENTITY_CLASS_LABEL, type TxEdge } from "../domain/researchGraph.js";
 import { dealNetProfit } from "../domain/metrics.js";
 import { nameSimilarity } from "../domain/researchBuyers.js";
+import { BUY_BOX_KEYS } from "../domain/buyerMatch.js";
+import { buyerEntityKeys } from "../services/buyerMatching.js";
 import { importRouter } from "./import.js";
 
 export const buyersRouter = Router();
@@ -198,6 +200,7 @@ buyersRouter.get(
       buyBox: b.buyBox ?? {
         states: [], counties: [], assetTypes: [],
         minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
+        minNra: null, maxNra: null, maxPricePerNma: null, leaseStatuses: [], operators: [], minRoyalty: null, strictKeys: [], notes: null,
       },
       closeRate: cr.rate,
       closedDeals: cr.closedWon,
@@ -213,15 +216,6 @@ buyersRouter.get(
 // --------------------------------------------------------------------------
 
 /** Normalized research-entity keys for a buyer: its company name + all aliases. */
-function buyerEntityKeys(companyName: string, aliases: string[]): string[] {
-  const keys = new Set<string>();
-  for (const raw of [companyName, ...aliases]) {
-    const k = normalizeEntity(raw);
-    if (k) keys.add(k);
-  }
-  return [...keys];
-}
-
 buyersRouter.get(
   "/:id/relationships",
   requirePermission("viewBuyers"),
@@ -621,6 +615,10 @@ buyersRouter.post(
           assetTypes: union(tb?.assetTypes, sb.assetTypes),
           minAcreage: tb?.minAcreage ?? sb.minAcreage, maxAcreage: tb?.maxAcreage ?? sb.maxAcreage,
           minPrice: tb?.minPrice ?? sb.minPrice, maxPrice: tb?.maxPrice ?? sb.maxPrice,
+          minNra: tb?.minNra ?? sb.minNra, maxNra: tb?.maxNra ?? sb.maxNra, maxPricePerNma: tb?.maxPricePerNma ?? sb.maxPricePerNma,
+          leaseStatuses: union(tb?.leaseStatuses, sb.leaseStatuses), operators: union(tb?.operators, sb.operators),
+          minRoyalty: tb?.minRoyalty ?? sb.minRoyalty, strictKeys: union(tb?.strictKeys, sb.strictKeys),
+          notes: tb?.notes ?? sb.notes,
         };
         if (tb) await tx.buyBoxCriteria.update({ where: { buyerId: target.id }, data: boxData });
         else await tx.buyBoxCriteria.create({ data: { buyerId: target.id, ...boxData } });
@@ -860,6 +858,17 @@ const buyBoxSchema = z.object({
   maxAcreage: z.number().nullish(),
   minPrice: z.number().nullish(),
   maxPrice: z.number().nullish(),
+  // Further criteria the matching engine reads (domain/buyerMatch.ts). Older
+  // clients that omit them leave the stored values alone (undefined = no change).
+  minNra: z.number().nullish().optional(),
+  maxNra: z.number().nullish().optional(),
+  maxPricePerNma: z.number().nullish().optional(),
+  leaseStatuses: z.array(z.string().max(200)).max(500).optional(),
+  operators: z.array(z.string().max(200)).max(500).optional(),
+  // Decimal fraction (3/16 → 0.1875).
+  minRoyalty: z.number().min(0).max(1).nullish().optional(),
+  strictKeys: z.array(z.enum(BUY_BOX_KEYS)).max(BUY_BOX_KEYS.length).optional(),
+  notes: z.string().max(5000).nullish().optional(),
 });
 
 /** Legacy "First Last" → split fields, for records that predate the split. */
