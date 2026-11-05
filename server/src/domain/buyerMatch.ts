@@ -137,6 +137,10 @@ export interface Acquisition {
   interestPct: number | null;
   /** Acreage conveyed when the record states it. */
   acreage: number | null;
+  /** The same recording: county + instrument number (several rows of one instrument are one acquisition). */
+  txKey?: string | null;
+  /** Same-day closing group (researchFields.txGroupKey): separate instruments that count once. */
+  groupKey?: string | null;
 }
 
 /** Where this deal sits, and what lies around it. Built once per deal by the

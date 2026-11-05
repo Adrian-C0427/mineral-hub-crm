@@ -36,7 +36,8 @@ const EXCLUDED = [
 ];
 
 /** Full-word mineral/O&G signals (safe as plain substrings). */
-const MINERAL_HINTS = ["MINERAL", "ROYALTY", "OIL", "GAS", "O&G", "OGM", "NPRI", "OVERRIDING", "PETROLEUM"];
+// "MNRL" / "MINRL": county index abbreviations ("TRSTEE MNRL DEED", "MINRL & ROY DEED").
+const MINERAL_HINTS = ["MINERAL", "ROYALTY", "OIL", "GAS", "O&G", "OGM", "NPRI", "OVERRIDING", "PETROLEUM", "MNRL", "MINRL"];
 
 /**
  * Abbreviation predicates for the terse vocabulary Texas county-clerk index
@@ -49,7 +50,8 @@ const reLease = /\bLEASE\b|\bLSE\b|\bLS\b|O&GL|OGL/;  // "OIL-GAS LSE", "REL OIL
 const reAssign = /ASSIGN|ASGMT|\bASG\b|\bASGN\b/;     // "ASGMT OF LEASE", "ASG ROYALTY INTR"
 const reRelease = /RELEASE|\bREL\b|TERMINAT|\bCANCEL/;// "REL OIL&GAS LS", "P/REL", "CANCEL LEASE"
 const reConvey = /CONVEY/;                            // "CONVEYNC" contains "CONVEY"
-const reMineral = /MINERAL|\bMIN\b/;                  // "MINERAL DEED", "MIN & ROYALTY DEED"
+const reMineral = /MINERAL|\bMIN\b|\bMNRL\b|\bMINRL\b/; // "MINERAL DEED", "MIN & ROYALTY DEED", "TRSTEE MNRL DEED"
+const reProdPayment = /\bPROD(?:UCTION)?\s+PAY(?:MENT|MNT|MT)?\b/; // "CONV PROD PAYMNT": an O&G production payment
 const reQuit = /QUITCLAIM|QUIT CLAIM|\bQ C\b/;        // "Q/C MINERAL DEED" -> "Q C ..."
 
 /**
@@ -95,6 +97,7 @@ export function classifyDocType(raw: string): { docType: DocType; docClass: DocC
   if (reMineral.test(t) && t.includes("DEED")) return { docType: "MINERAL_DEED", docClass: "TRANSACTION" };
   if (reMineral.test(t) && (reConvey.test(t) || t.includes("TRANSFER") || t.includes("GRANT")))
     return { docType: "MINERAL_CONVEYANCE", docClass: "TRANSACTION" };
+  if (reProdPayment.test(t)) return { docType: "OG_CONVEYANCE", docClass: "TRANSACTION" };
   if ((has("OIL", "GAS") || t.includes("O&G")) && (reConvey.test(t) || t.includes("DEED") || t.includes("GRANT")))
     return { docType: "OG_CONVEYANCE", docClass: "TRANSACTION" };
   if (reAssign.test(t)) {

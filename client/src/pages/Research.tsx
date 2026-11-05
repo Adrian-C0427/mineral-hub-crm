@@ -14,6 +14,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { useAbstractIndex } from "../components/AbstractPicker";
 import { rankAbstracts } from "../lib/abstracts";
 import { countySt, recordAbstracts, recordSurveys, surveyName } from "../lib/researchGeo";
+import { DOC_FLAGS, DOC_FLAG_LABEL, NON_ACQUISITION_FLAGS, SHARE_BASIS_LABEL, docTypeLabel, fmtPct as fmtSharePct, percentSoldText } from "../lib/researchRecord";
 import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -90,6 +91,16 @@ interface DocRecord {
   /** Each abstract NUMBER on the record ("923"); `abstractId` is the cell as recorded. */
   abstractIds?: string[];
   legalDescription?: string | null;
+  volume?: string | null; page?: string | null;
+  /** County master-file fields (server domain/researchFields.ts). */
+  percentSold?: number | null; percentSoldRaw?: string | null;
+  shareBasis?: "absolute" | "of-conveyed" | "unknown" | null; granteeStatedTotalPct?: number | null;
+  surveys?: string[]; surveyAsRecorded?: string | null;
+  tracts?: { abstract: string; survey: string }[] | null;
+  abstractSource?: "recorded" | "survey-lookup" | null;
+  docFlags?: string[]; countsAsAcquisition?: boolean;
+  sourceRow?: Record<string, string> | null;
+  ingestRunId?: string | null; createdAt?: string; updatedAt?: string | null;
 }
 /** Per-party detail: a share of the interest and/or an annotation the clerk wrote against the party. */
 interface PartyInterestRec { side: "GRANTOR" | "GRANTEE"; party: string; norm: string; pct: number | null; text: string | null; acres?: number | null; note?: string | null }
@@ -1917,7 +1928,7 @@ function TxDrillModal({ qs, title, selector, onClose }: {
             <span className="rs-mid">{rows.length} transaction{rows.length === 1 ? "" : "s"}</span>
             <button type="button" className="rs-outline-btn" onClick={() => downloadCsv("relationship-transactions.csv",
               ["Recorded", "Type", "Grantor", "Grantee", "Interest conveyed", "County", "Abstract", "Instrument #"],
-              rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.grantor, r.grantee, interestText(r), `${r.county}, ${r.state}`, r.abstractId, r.instrumentNumber]))}>
+              rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.grantor, r.grantee, interestText(r), `${r.county}, ${r.state}`, recordAbstracts(r).join(", "), r.instrumentNumber]))}>
               <DownloadIcon />
               Export CSV
             </button>
@@ -1935,7 +1946,7 @@ function TxDrillModal({ qs, title, selector, onClose }: {
                     <td><InterestCell r={r} /></td>
                     <td className="rec-nowrap">{r.county}, {r.state}</td>
                     <td>
-                      {r.abstractId ? <span className="rs-strong">{r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state)).join("; ")}</span> : <span className="rs-zero">—</span>}
+                      {recordAbstracts(r).length ? <span className="rs-strong">{recordAbstracts(r).map((a) => absIndex.label(a, r.county, r.state)).join("; ")}</span> : <span className="rs-zero">—</span>}
                       {r.survey && <span className="rs-sub-line">{r.survey}</span>}
                     </td>
                     <td><span className="rs-mono">{r.instrumentNumber ?? "—"}</span></td>
@@ -2100,13 +2111,107 @@ interface AbstractBuyer {
 
 // docClass is NOT a records-level filter — the page-level dataset toggle
 // (Transactions/Deeds vs Leases) owns record-class separation for every view.
-interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; grantors: string[]; grantees: string[]; statuses: string[]; trajectories: string[]; instrument: string; from: string; to: string; interestMin: string; interestMax: string }
-const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], grantors: [], grantees: [], statuses: [], trajectories: [], instrument: "", from: "", to: "", interestMin: "", interestMax: "" };
+interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; grantors: string[]; grantees: string[]; statuses: string[]; trajectories: string[]; instrument: string; from: string; to: string; interestMin: string; interestMax: string; percentSoldMin: string; percentSoldMax: string; flags: string[]; acquisition: "" | "acquisitions" | "other" }
+const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], grantors: [], grantees: [], statuses: [], trajectories: [], instrument: "", from: "", to: "", interestMin: "", interestMax: "", percentSoldMin: "", percentSoldMax: "", flags: [], acquisition: "" };
 /** A typed percent filter value, or "" when empty / not a 0–100 number. */
 const pctFilter = (v: string) => { const n = Number(v.trim()); return v.trim() && Number.isFinite(n) && n >= 0 && n <= 100 ? String(n) : ""; };
 // grantors/grantees are {value: normalized key, label: display name} — a
 // multi-party cell contributes each participant as its own option.
 interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string[]; docTypes?: string[]; docClasses?: string[]; grantors?: { value: string; label: string }[]; grantees?: { value: string; label: string }[]; statuses?: string[]; trajectories?: string[] }
+
+/**
+ * One transaction, every field: the master-file values, the parties as
+ * recorded and parsed, the geography (abstract ↔ survey pairs when the file
+ * gave them), the recording and import trail, and every source column as the
+ * file had it — nothing is reachable only through an export.
+ */
+function RecordDetail({ r, onClose }: { r: DocRecord; onClose: () => void }) {
+  const flags = r.docFlags ?? [];
+  const parties = (side: "GRANTOR" | "GRANTEE") => {
+    const names = (side === "GRANTOR" ? r.grantorParties : r.granteeParties) ?? [];
+    const detail = new Map((r.partyInterests ?? []).filter((i) => i.side === side).map((i) => [i.party, i]));
+    const list = names.length ? names : [side === "GRANTOR" ? r.grantor : r.grantee].filter((x): x is string => !!x);
+    return list.map((name) => ({ name, d: detail.get(name) }));
+  };
+  const KVRow = ({ k, children }: { k: string; children: React.ReactNode }) => (
+    <div className="rd-kv"><span className="rd-k">{k}</span><span className="rd-v">{children}</span></div>
+  );
+  const none = <span className="rs-zero">—</span>;
+  const surveys = r.surveys?.length ? r.surveys : (r.survey ?? "").split(/\s*;\s*/).filter(Boolean);
+  return (
+    <Modal wide title={`${docTypeLabel(r.docTypeRaw) || prettyDocType(r.docType)} · ${fmtDate(r.recordingDate)}`}
+      subtitle={[r.instrumentNumber ? `Instrument ${r.instrumentNumber}` : null, countySt(r.county, r.state)].filter(Boolean).join(" · ")}
+      onClose={onClose} footer={<button type="button" className="primary" onClick={onClose}>Done</button>}>
+      <div className="rd-grid">
+        <section className="rd-sec">
+          <h4>Transaction</h4>
+          <KVRow k="Type">{r.docTypeRaw}{docTypeLabel(r.docTypeRaw).toUpperCase() !== r.docTypeRaw.toUpperCase() && <span className="rs-mid"> · {docTypeLabel(r.docTypeRaw)}</span>}</KVRow>
+          <KVRow k="Classified as">{prettyDocType(r.docType)}</KVRow>
+          <KVRow k="Recorded">{fmtDate(r.recordingDate)}</KVRow>
+          <KVRow k="Percent sold">{r.percentSold != null || r.percentSoldRaw ? percentSoldText(r) : none}
+            {r.percentSold == null && r.percentSoldRaw && <span className="rs-sub-line muted">Several values as recorded — not reduced to one</span>}</KVRow>
+          <KVRow k="Grantee shares">{r.shareBasis ? SHARE_BASIS_LABEL[r.shareBasis] : none}</KVRow>
+          {r.granteeStatedTotalPct != null && <KVRow k="Grantee total (as written)">{fmtSharePct(r.granteeStatedTotalPct)}</KVRow>}
+          <KVRow k="Counts as acquisition">{r.countsAsAcquisition === false ? "No — kept on record, left out of buyer counts and matching" : "Yes"}</KVRow>
+          {flags.length > 0 && <KVRow k="Flags"><span className="rd-tags">{flags.map((f) => <Tag key={f} tone={NON_ACQUISITION_FLAGS.has(f) ? "warn" : "neutral"}>{DOC_FLAG_LABEL[f] ?? f}</Tag>)}</span></KVRow>}
+        </section>
+        <section className="rd-sec">
+          <h4>Grantor / Grantee</h4>
+          {(["GRANTOR", "GRANTEE"] as const).map((side) => (
+            <div key={side} className="rd-party">
+              <div className="rd-k">{side === "GRANTOR" ? "Grantor (seller)" : "Grantee (buyer)"} — as recorded</div>
+              <div className="rd-recorded">{(side === "GRANTOR" ? r.grantorAsRecorded ?? r.grantor : r.granteeAsRecorded ?? r.grantee) ?? "—"}</div>
+              <table className="data-table rd-table">
+                <tbody>
+                  {parties(side).map(({ name, d }) => (
+                    <tr key={name}>
+                      <td>{name}</td>
+                      <td className="right rec-nowrap">{d?.pct != null ? fmtSharePct(d.pct) : ""}</td>
+                      <td className="rs-mid">{[d?.acres != null ? `${d.acres} NMA` : null, d?.note].filter(Boolean).join(" · ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </section>
+        <section className="rd-sec">
+          <h4>Geography</h4>
+          {r.tracts?.length ? (
+            <table className="data-table rd-table">
+              <thead><tr><th>Abstract</th><th>Survey (as recorded)</th><th>Survey</th></tr></thead>
+              <tbody>{r.tracts.map((t, i) => <tr key={i}><td>{t.abstract}</td><td className="rs-mid">{t.survey}</td><td>{surveyName(t.survey)}</td></tr>)}</tbody>
+            </table>
+          ) : (
+            <>
+              <KVRow k="Abstract">{recordAbstracts(r).length ? <ChipList items={recordAbstracts(r)} /> : none}</KVRow>
+              <KVRow k="Survey Name">{surveys.length ? <ChipList items={surveys} /> : none}</KVRow>
+              {r.surveyAsRecorded && <KVRow k="Survey (as recorded)">{r.surveyAsRecorded}</KVRow>}
+            </>
+          )}
+          {r.abstractSource === "survey-lookup" && <p className="rs-mid rs-small">The abstract was looked up from the survey name (the county survey layer has exactly one abstract for it); the record itself names none.</p>}
+          <KVRow k="County">{countySt(r.county, r.state)}</KVRow>
+        </section>
+        <section className="rd-sec">
+          <h4>Instrument / Recording</h4>
+          <KVRow k="Instrument #">{r.instrumentNumber ?? none}</KVRow>
+          <KVRow k="Volume / Page">{r.volume || r.page ? `${r.volume ?? "—"} / ${r.page ?? "—"}` : none}</KVRow>
+          <KVRow k="Source">{r.source}</KVRow>
+          {r.createdAt && <KVRow k="Added">{fmtDate(r.createdAt)}</KVRow>}
+          {r.updatedAt && <KVRow k="Updated">{fmtDate(r.updatedAt)} · by a master-file import (previous values archived)</KVRow>}
+        </section>
+        <section className="rd-sec rd-wide">
+          <h4>Source details</h4>
+          {r.sourceRow && Object.keys(r.sourceRow).length ? (
+            <div className="rd-source">
+              {Object.entries(r.sourceRow).map(([k, v]) => <KVRow key={k} k={k}>{v ? v : none}</KVRow>)}
+            </div>
+          ) : <p className="rs-mid rs-small">This record was imported before source columns were kept. Re-importing its county master file adds them.</p>}
+        </section>
+      </div>
+    </Modal>
+  );
+}
 
 function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const { can } = useAuth();
@@ -2122,6 +2227,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const [rrcPermits, setRrcPermits] = useState<Paged<RrcPermitRecord> | null>(null);
   const [loading, setLoading] = useState(true);
   const sel = useRowSelection();
+  const [detail, setDetail] = useState<DocRecord | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -2173,13 +2279,18 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     if (rf.to) p.set("to", rf.to);
     if (kind === "documents" && pctFilter(rf.interestMin)) p.set("interestMin", pctFilter(rf.interestMin));
     if (kind === "documents" && pctFilter(rf.interestMax)) p.set("interestMax", pctFilter(rf.interestMax));
+    if (kind === "documents" && pctFilter(rf.percentSoldMin)) p.set("percentSoldMin", pctFilter(rf.percentSoldMin));
+    if (kind === "documents" && pctFilter(rf.percentSoldMax)) p.set("percentSoldMax", pctFilter(rf.percentSoldMax));
+    if (kind === "documents") for (const fl of rf.flags) p.append("flag", fl);
+    if (kind === "documents" && rf.acquisition) p.set("acquisition", rf.acquisition);
     if (searchQ) p.set("q", searchQ);
     return p.toString();
   }, [qs, rf, searchQ, instrumentQ, kind]);
   const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.surveys.length + rf.docTypes.length +
     rf.grantors.length + rf.grantees.length +
     rf.statuses.length + rf.trajectories.length + (rf.instrument.trim() ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0) +
-    (pctFilter(rf.interestMin) || pctFilter(rf.interestMax) ? 1 : 0);
+    (pctFilter(rf.interestMin) || pctFilter(rf.interestMax) ? 1 : 0) +
+    (pctFilter(rf.percentSoldMin) || pctFilter(rf.percentSoldMax) ? 1 : 0) + rf.flags.length + (rf.acquisition ? 1 : 0);
 
   // Abstract Buyer Preview: whenever an abstract is selected (page-level drill
   // or the records Abstract filter), summarize its top 5 buyers above the table
@@ -2265,8 +2376,13 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         let rows = await fetchAllRows<DocRecord>("documents");
         if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
         downloadCsv(onlySelected ? "research-documents-selected.csv" : "research-documents.csv",
-          ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Interest conveyed", "Instrument #", ...GEO_HEADERS],
-          rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, interestText(r), r.instrumentNumber, ...geoCells(r)]));
+          ["Recording Date", "Type", "Type (label)", "Class", "Grantor", "Grantor (as recorded)", "Grantee", "Grantee (as recorded)",
+            "Percent sold", "Percent sold (as recorded)", "Share basis", "Party shares", "Instrument #", "Volume", "Page", ...GEO_HEADERS, "State",
+            "Survey (as recorded)", "Abstract ↔ survey", "Flags", "Counts as acquisition"],
+          rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, docTypeLabel(r.docTypeRaw), r.docClass, r.grantor, r.grantorAsRecorded ?? "", r.grantee, r.granteeAsRecorded ?? "",
+            r.percentSold != null ? String(r.percentSold) : "", r.percentSoldRaw ?? "", r.shareBasis ?? "", interestText(r), r.instrumentNumber, r.volume ?? "", r.page ?? "", ...geoCells(r), r.state,
+            r.surveyAsRecorded ?? "", (r.tracts ?? []).map((t) => `${t.abstract}: ${t.survey}`).join("; "),
+            (r.docFlags ?? []).map((f) => DOC_FLAG_LABEL[f] ?? f).join("; "), r.countsAsAcquisition === false ? "No" : "Yes"]));
       } else if (kind === "rrcPermits") {
         const rows = await fetchAllRows<RrcPermitRecord>("rrc-permits");
         downloadCsv("rrc-permits.csv",
@@ -2305,15 +2421,37 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   }
   const docColumns: Column<DocRecord>[] = [
     { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rs-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
-    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <DocTypeTag docType={r.docType} raw={r.docTypeRaw} /> },
+    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => (
+      <span className="rec-type-cell">
+        <DocTypeTag docType={r.docType} raw={`As recorded: ${r.docTypeRaw}${docTypeLabel(r.docTypeRaw).toUpperCase() !== r.docTypeRaw.toUpperCase() ? ` (${docTypeLabel(r.docTypeRaw)})` : ""}`} />
+        {(r.docFlags ?? []).filter((f) => f !== "estate-or-trust-seller").map((f) => (
+          <Tag key={f} tone={NON_ACQUISITION_FLAGS.has(f) ? "warn" : "neutral"} title={NON_ACQUISITION_FLAGS.has(f) ? "Kept on record; not counted as a buyer's acquisition" : undefined}>{DOC_FLAG_LABEL[f] ?? f}</Tag>
+        ))}
+      </span>
+    ) },
     // No `max` on the records chip columns: every party/abstract renders (chips
     // wrap onto extra lines) — nothing hides behind a "+N" indicator.
     { key: "grantor", header: dataset === "LEASE" ? "Grantor (lessor)" : "Grantor (seller)", value: (r) => r.grantor, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} /></span> },
     { key: "grantee", header: dataset === "LEASE" ? "Grantee (lessee)" : "Grantee (buyer)", value: (r) => r.grantee, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} /></span> },
-    { key: "interestPct", header: "Interest conveyed", value: (r) => r.interestPct ?? null, align: "right", type: "number", render: (r) => <InterestCell r={r} /> },
+    // Percent sold: the share of the grantor's own interest the instrument
+    // conveys (the master file's column); several values show as recorded.
+    { key: "percentSold", header: "Percent sold", value: (r) => r.percentSold ?? null, align: "right", type: "number", revealWhenNew: true,
+      render: (r) => r.percentSold != null || r.percentSoldRaw
+        ? <span className="rec-nowrap" title={r.shareBasis ? SHARE_BASIS_LABEL[r.shareBasis] : undefined}><span className="rs-strong">{percentSoldText(r)}</span></span>
+        : dash },
+    // The "(x%)" shares written in the party cells, kept apart from percent sold.
+    { key: "interestPct", header: "Party shares", value: (r) => r.interestPct ?? null, align: "right", type: "number", defaultHidden: true, render: (r) => <InterestCell r={r} /> },
     // Location: Abstract, Survey Name and County as three columns (lib/researchGeo).
     ...geoColumns<DocRecord>((r) => r),
     { key: "instrumentNumber", header: "Instrument #", value: (r) => r.instrumentNumber, align: "right", render: (r) => r.instrumentNumber ? <span className="rs-mono rec-nowrap">{r.instrumentNumber}</span> : dash },
+    // Optional (Customize View): every other source field stays one click away.
+    { key: "volume", header: "Volume", value: (r) => r.volume ?? null, align: "right", defaultHidden: true, render: (r) => r.volume ? <span className="rs-mono rec-nowrap">{r.volume}</span> : dash },
+    { key: "page", header: "Page", value: (r) => r.page ?? null, align: "right", defaultHidden: true, render: (r) => r.page ? <span className="rs-mono rec-nowrap">{r.page}</span> : dash },
+    { key: "state", header: "State", value: (r) => r.state, defaultHidden: true },
+    { key: "docTypeRaw", header: "Type as recorded", value: (r) => r.docTypeRaw, defaultHidden: true,
+      render: (r) => <span className="rec-nowrap" title={docTypeLabel(r.docTypeRaw)}>{r.docTypeRaw}</span> },
+    { key: "shareBasis", header: "Share basis", value: (r) => r.shareBasis ?? null, defaultHidden: true,
+      render: (r) => r.shareBasis ? <span className="rs-mid">{SHARE_BASIS_LABEL[r.shareBasis]}</span> : dash },
   ];
   const permitColumns: Column<PermitRecord>[] = [
     { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => <span className="rs-mid rec-nowrap">{fmtDate(r.activityDate)}</span>, type: "date" },
@@ -2427,6 +2565,31 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
               </div></div>
             </div></div>
         )}
+        {kind === "documents" && (
+          <div><div className="rec-flabel">Percent sold (%)</div>
+            <div className="rs-pct-range">
+              <div className="msel msel-single"><div className="msel-box">
+                <input className="datef-input" inputMode="decimal" value={rf.percentSoldMin} onChange={(e) => setRf((p) => ({ ...p, percentSoldMin: e.target.value }))}
+                  placeholder="Min" aria-label="Minimum percent sold" />
+              </div></div>
+              <span className="rs-mid" aria-hidden>–</span>
+              <div className="msel msel-single"><div className="msel-box">
+                <input className="datef-input" inputMode="decimal" value={rf.percentSoldMax} onChange={(e) => setRf((p) => ({ ...p, percentSoldMax: e.target.value }))}
+                  placeholder="Max" aria-label="Maximum percent sold" />
+              </div></div>
+            </div></div>
+        )}
+        {kind === "documents" && (
+          <div><div className="rec-flabel">Flags</div>
+            <SearchableMultiSelect options={[...DOC_FLAGS]} labels={DOC_FLAG_LABEL}
+              value={rf.flags} onChange={(v) => setRf((p) => ({ ...p, flags: v }))} placeholder="Corrections, gifts…" /></div>
+        )}
+        {kind === "documents" && (
+          <div><div className="rec-flabel">Counts as acquisition</div>
+            <Select value={rf.acquisition} onChange={(v) => setRf((p) => ({ ...p, acquisition: v as RecFilters["acquisition"] }))} ariaLabel="Counts as acquisition"
+              options={[{ value: "", label: "All records" }, { value: "acquisitions", label: "Acquisitions only" }, { value: "other", label: "Not counted (corrections, gifts…)" }]} />
+          </div>
+        )}
         <div><div className="rec-flabel">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
         <div><div className="rec-flabel">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
       </div>
@@ -2494,7 +2657,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         ) : (
           <>
             {kind === "documents"
-              ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
+              ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} onRowClick={setDetail} />
               : kind === "rrcPermits"
               ? <SortableTable customizeId="research-records-rrc-permits" columns={rrcPermitColumns} rows={rrcPermits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} />
               : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
@@ -2514,6 +2677,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
       {confirmDel && (
         <ConfirmDelete count={sel.selected.size} itemLabel="record" busy={busy} onCancel={() => setConfirmDel(false)} onConfirm={bulkDelete} />
       )}
+      {detail && <RecordDetail r={detail} onClose={() => setDetail(null)} />}
     </>
   );
 }

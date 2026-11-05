@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { abstractLabelSql } from "../routes/gis.js";
 import { abstractNumber } from "../domain/abstractLabel.js";
 import { abstractNumbers, joinSurveys, parseLegalGeography, surveyName } from "../domain/researchGeo.js";
+import { surveyKey } from "../domain/researchFields.js";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -53,6 +54,57 @@ export async function gisSurveyLookup(db: Db, counties: readonly string[]): Prom
     const hit = surveys.get(`${county.toLowerCase()}|${abstractNumber(abstractNo)}`);
     return hit && hit.size === 1 ? [...hit][0] : null;
   };
+}
+
+/** (county, survey name) → the abstract numbers that survey covers there; empty when unknown. */
+export type AbstractLookup = (county: string, survey: string) => string[];
+
+/**
+ * Abstract numbers for a survey name from the GIS abstract layer (Texas): the
+ * reverse of gisSurveyLookup, matched on the survey's letters only so "J N
+ * BLACK" (a county index) finds "BLACK, J N" (the layer). The caller decides
+ * what to do with several abstracts per survey (the import takes only a single
+ * match — anything else stays blank).
+ */
+export async function gisAbstractLookup(db: Db, counties: readonly string[]): Promise<AbstractLookup> {
+  const wanted = [...new Set(counties.map((c) => c.trim().toLowerCase()).filter(Boolean))];
+  const none: AbstractLookup = () => [];
+  if (!wanted.length) return none;
+  let rows: { abstract: string | null; survey: string | null; county: string }[];
+  try {
+    rows = await db.$queryRawUnsafe(
+      `SELECT ${abstractLabelSql("gis_a")} AS abstract, gis_a.survey, gis_a.county FROM gis.abstracts gis_a
+        WHERE coalesce(gis_a.state, 'TX') = 'TX' AND lower(gis_a.county) = ANY($1::text[]) AND gis_a.survey IS NOT NULL`,
+      wanted,
+    );
+  } catch {
+    return none;
+  }
+  const byKey = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const n = abstractNumber(r.abstract);
+    const k = surveyKey(surveyName(r.survey));
+    if (!n || !k || !/\d/.test(n)) continue;
+    const key = `${r.county.toLowerCase()}|${k}`;
+    byKey.set(key, (byKey.get(key) ?? new Set()).add(n));
+  }
+  return (county, survey) => [...(byKey.get(`${county.toLowerCase()}|${surveyKey(surveyName(survey) ?? survey)}`) ?? [])];
+}
+
+/**
+ * Abstract numbers for a record that names surveys but no abstract: each
+ * survey must resolve to exactly ONE abstract in the county, else nothing
+ * (a survey spanning several abstracts never picks one).
+ */
+export function abstractsForSurveys(lookup: AbstractLookup, county: string, surveys: readonly string[]): string[] {
+  if (!surveys.length) return [];
+  const out: string[] = [];
+  for (const s of surveys) {
+    const hits = lookup(county, s);
+    if (hits.length !== 1) return [];
+    if (!out.includes(hits[0])) out.push(hits[0]);
+  }
+  return out;
 }
 
 const BATCH = 500;

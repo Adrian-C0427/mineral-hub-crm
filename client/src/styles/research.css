@@ -642,3 +642,25 @@
 /* Records filter: interest conveyed min – max (%). */
 .rs-pct-range { display: flex; align-items: center; gap: 6px; }
 .rs-pct-range > .msel { flex: 1 1 0; min-width: 0; }
+
+/* Records: the Type cell carries the instrument's flags (Correction, Gift…). */
+.rec-type-cell { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* Transaction detail (Records row click). */
+.rd-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; }
+.rd-sec h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3, var(--muted)); }
+.rd-wide { grid-column: 1 / -1; }
+.rd-kv { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; padding: 4px 0; font-size: 13px; }
+.rd-k { color: var(--ink-3, var(--muted)); font-size: 12px; }
+.rd-v { min-width: 0; overflow-wrap: anywhere; }
+.rd-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.rd-party + .rd-party { margin-top: 12px; }
+.rd-recorded { font-size: 13px; padding: 6px 8px; margin: 4px 0 6px; border-radius: 6px; background: var(--surface-2, rgba(127,127,127,.08)); overflow-wrap: anywhere; }
+.modal-body table.data-table.rd-table { font-size: 12.5px; min-width: 0; width: 100%; }
+.rd-table td:first-child { overflow-wrap: anywhere; }
+.rd-table td, .rd-table th { padding: 4px 8px; }
+.rd-source { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+@media (max-width: 760px) {
+  .rd-grid, .rd-source { grid-template-columns: 1fr; }
+  .rd-kv { grid-template-columns: 120px minmax(0, 1fr); }
+}

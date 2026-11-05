@@ -607,21 +607,21 @@ model User {
   sentEmails                EmailMessage[]       @relation("SentEmails")
   cloudLinksCreated         CloudFileLink[]      @relation("CloudLinksCreated")
 
-  ownedDeals             Deal[]                  @relation("DealRelationshipOwner")
+  ownedDeals             Deal[]                   @relation("DealRelationshipOwner")
   buyerOwnerships        BuyerOwner[]
   stageChanges           DealStageHistory[]
-  sentActivities         DealBuyerActivity[]     @relation("SentActivities")
+  sentActivities         DealBuyerActivity[]      @relation("SentActivities")
   matchOverrides         DealBuyerMatchOverride[] @relation("MatchOverrides")
-  assignedActivities     DealBuyerActivity[]     @relation("AssignedActivities")
-  authoredMessages       DealBuyerMessage[]      @relation("AuthoredMessages")
+  assignedActivities     DealBuyerActivity[]      @relation("AssignedActivities")
+  authoredMessages       DealBuyerMessage[]       @relation("AuthoredMessages")
   uploadedFiles          FileAttachment[]
   activityLogs           ActivityLog[]
   expenses               Expense[]
-  sellerAssignments      DealSeller[]            @relation("SellerAssignments")
-  assignedDeals          Deal[]                  @relation("DealAssignees")
-  calendarAssigned       CalendarEvent[]         @relation("CalendarAssignee")
-  calendarCreated        CalendarEvent[]         @relation("CalendarCreator")
-  opportunitiesOwned     Opportunity[]           @relation("OpportunityOwner")
+  sellerAssignments      DealSeller[]             @relation("SellerAssignments")
+  assignedDeals          Deal[]                   @relation("DealAssignees")
+  calendarAssigned       CalendarEvent[]          @relation("CalendarAssignee")
+  calendarCreated        CalendarEvent[]          @relation("CalendarCreator")
+  opportunitiesOwned     Opportunity[]            @relation("OpportunityOwner")
   notificationPreference NotificationPreference?
 
   @@index([organizationId])
@@ -835,7 +835,7 @@ model Deal {
   stageHistory       DealStageHistory[]
   buyerActivity      DealBuyerActivity[]
   buyerMessages      DealBuyerMessage[]
-  offers             Offer[]                 @relation("DealOffers")
+  offers             Offer[]                  @relation("DealOffers")
   matchOverrides     DealBuyerMatchOverride[]
   files              FileAttachment[]
   portalEvents       PortalEvent[]
@@ -845,11 +845,11 @@ model Deal {
   mapTracts          MapTract[]
   calendarEvents     CalendarEvent[]
   // The prospect this deal was converted from, if any (column lives on Opportunity).
-  fromOpportunity    Opportunity?            @relation("OpportunityConvertedDeal")
+  fromOpportunity    Opportunity?             @relation("OpportunityConvertedDeal")
   contractExtensions DealContractExtension[]
   // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
   // is retained as the originating/primary owner for existing metrics & reports.
-  assignees          User[]                  @relation("DealAssignees")
+  assignees          User[]                   @relation("DealAssignees")
   emailLinks         EmailLink[]
   cloudLinks         CloudFileLink[]
 
@@ -1072,9 +1072,9 @@ model Buyer {
   tags           BuyerTagOnBuyer[]
   dealActivity   DealBuyerActivity[]
   buyerMessages  DealBuyerMessage[]
-  offers         Offer[]             @relation("BuyerOffers")
+  offers         Offer[]                  @relation("BuyerOffers")
   matchOverrides DealBuyerMatchOverride[]
-  selectedFor    Deal[]              @relation("SelectedBuyer")
+  selectedFor    Deal[]                   @relation("SelectedBuyer")
   files          FileAttachment[]
   activityLogs   ActivityLog[]
   calendarEvents CalendarEvent[]
@@ -1087,18 +1087,18 @@ model Buyer {
 }
 
 model BuyBoxCriteria {
-  id         String   @id @default(cuid())
-  buyerId    String   @unique
-  buyer      Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
-  states     String[]
-  counties   String[]
-  assetTypes String[]
+  id             String   @id @default(cuid())
+  buyerId        String   @unique
+  buyer          Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  states         String[]
+  counties       String[]
+  assetTypes     String[]
   // Net mineral acres (the "acreage" the buyer talks about).
-  minAcreage Float?
-  maxAcreage Float?
+  minAcreage     Float?
+  maxAcreage     Float?
   // Deal size, total dollars.
-  minPrice   Float?
-  maxPrice   Float?
+  minPrice       Float?
+  maxPrice       Float?
   // Further stated criteria (domain/buyerMatch.ts). All optional; blank means
   // the buyer has not told us, NOT that they take anything.
   minNra         Float?
@@ -1504,12 +1504,59 @@ model ResearchDocument {
   source    String  @default("manual") // adapter key (see domain/researchSources.ts)
   sourceRef String? // row id / document URL at the source
 
+  // ---- County master-file fields (domain/researchFields.ts) ----------------
+  // PERCENT SOLD: the share of the GRANTOR'S own interest the instrument
+  // conveys, 0–100. A cell listing several values ("66.67%; 33.33%") keeps
+  // the number null and the cell verbatim in percentSoldRaw.
+  percentSold           Float?
+  percentSoldRaw        String?
+  // How the grantee "(x%)" shares read against percentSold: "absolute" (they
+  // add up to it), "of-conveyed" (they add up to 100 — each buyer's split of
+  // what was conveyed) or "unknown". Null when no share or no percent.
+  shareBasis            String?
+  // A "[66% TOTAL]" tag written after the grantee list.
+  granteeStatedTotalPct Float?
+  // Survey names one per entry (standardized), like abstractIds; `survey`
+  // keeps them "; "-joined for older readers. surveyAsRecorded = the cell.
+  surveys               String[]  @default([])
+  surveyAsRecorded      String?
+  // Abstract ↔ survey pairs as the file lists them, positionally, when the two
+  // cells name the same number of entries: [{ abstract, survey }].
+  tracts                Json?
+  // "recorded" (the abstract cell) or "survey-lookup" (resolved from the
+  // county survey layer: survey named, no abstract, one match only).
+  abstractSource        String?
+  // correction · certified-copy · amendment · gift · stipulation ·
+  // outside-master-list · estate-or-trust-seller (see researchFields.ts).
+  docFlags              String[]  @default([])
+  // False for instruments that re-record or are not market purchases
+  // (corrections, certified copies, amendments, gifts, stipulations, rows a
+  // county master file leaves out): kept and shown, never counted as a
+  // buyer's acquisition in rankings, profiles or matching.
+  countsAsAcquisition   Boolean   @default(true)
+  // Same-day closing group: separate instruments with the same parties,
+  // date and abstracts share this key and count once in buyer activity.
+  txGroupKey            String?
+  // Every column of the source row exactly as the file had it.
+  sourceRow             Json?
+  // Version of the derived fields above (services/researchDerivedBackfill).
+  derivedVersion        Int       @default(0)
+  // A master-file import that updated this row in place (ids never change;
+  // the previous values are in archive.research_document_history).
+  updatedAt             DateTime?
+  updatedByRunId        String?
+
   // Links each record to the import batch (ResearchIngestRun) that created it,
   // so a single import can be deleted without touching other data. Null for
   // records created before batch tracking or by the sample seeder.
   ingestRunId String?
   createdAt   DateTime @default(now())
 
+  @@index([organizationId, state, county, instrumentNumber])
+  @@index([organizationId, percentSold])
+  @@index([organizationId, txGroupKey])
+  @@index([surveys], type: Gin)
+  @@index([abstractIds], type: Gin)
   @@index([organizationId, state, county, recordingDate])
   @@index([organizationId, docClass, recordingDate])
   @@index([organizationId, granteeNorm])

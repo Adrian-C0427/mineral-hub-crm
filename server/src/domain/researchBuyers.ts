@@ -6,6 +6,7 @@
  * possible duplicate), and produces an ADDITIVE merge plan that never overwrites
  * user-entered data.
  */
+import { abstractNumbers } from "./researchGeo.js";
 import { normalizeEntity } from "./research.js";
 
 /** "MINERAL_DEED" -> "Mineral Deed" for display. */
@@ -23,6 +24,8 @@ export interface ResearchDocLite {
   state: string;
   county: string;
   abstractId: string | null;
+  /** The abstract numbers of the record (the cell split); falls back to the cell. */
+  abstractIds?: string[];
   docType: string;
   recordingDate: Date;
 }
@@ -66,7 +69,10 @@ export function buildResearchBuyer(rows: ResearchDocLite[]): ResearchBuyerData |
 
   const counties = [...new Set(rows.map((r) => r.county).filter(Boolean))].sort();
   const states = [...new Set(rows.map((r) => r.state).filter(Boolean))].sort();
-  const abstracts = topByCount(rows, (r) => r.abstractId, 12);
+  // Each abstract on its own ("15; 47" is 15 and 47), county-free numbers as before.
+  const absCounts = new Map<string, number>();
+  for (const r of rows) for (const n of r.abstractIds?.length ? r.abstractIds : abstractNumbers(r.abstractId)) absCounts.set(n, (absCounts.get(n) ?? 0) + 1);
+  const abstracts = [...absCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], undefined, { numeric: true })).slice(0, 12).map(([k]) => k);
   const transactionTypes = topByCount(rows, (r) => r.docType, 8).map(prettyEnum);
 
   const times = rows.map((r) => r.recordingDate.getTime()).sort((a, b) => a - b);

@@ -23,6 +23,7 @@
  * unit-testable; the route layer only loads rows and calls in.
  */
 import { normalizeEntity, splitParties } from "./research.js";
+import { abstractNumbers } from "./researchGeo.js";
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -44,8 +45,12 @@ export interface TxEdge {
   grantee: string;            // buyer display name
   state: string;
   county: string;
+  /** The abstract cell as recorded; `abstractIds` (when present) holds its numbers. */
   abstractId: string | null;
+  abstractIds?: string[];
   date: Date;
+  /** Same-day closing group (researchFields.txGroupKey): instruments that count as one transaction. */
+  groupKey?: string | null;
   /** Instrument-level grouping key; edges sharing it are the same recording. */
   txKey: string | null;
   /**
@@ -74,9 +79,18 @@ export interface TransferDocRow {
   state: string;
   county: string;
   abstractId: string | null;
+  abstractIds?: string[];
   recordingDate: Date;
   instrumentNumber: string | null;
+  txGroupKey?: string | null;
 }
+
+/** An edge's abstract numbers: the stored list, else split from the cell as recorded. */
+export function edgeAbstracts(e: { abstractId: string | null; abstractIds?: string[] }): string[] {
+  return e.abstractIds?.length ? e.abstractIds : abstractNumbers(e.abstractId);
+}
+/** The transaction an edge belongs to: its same-day group when it has one, else its document. */
+const txIdent = (e: { id: string; groupKey?: string | null }) => e.groupKey ?? e.id;
 
 /** Sanity cap — a "party list" beyond this is a mangled cell, not a group.
  *  Generous: a probate or family conveyance can name 20+ heirs on one side,
@@ -129,7 +143,7 @@ export function expandDocToEdges(r: TransferDocRow): TxEdge[] {
         id: r.id,
         grantorNorm: g.norm, grantor: g.name,
         granteeNorm: t.norm, grantee: t.name,
-        state: r.state, county: r.county, abstractId: r.abstractId,
+        state: r.state, county: r.county, abstractId: r.abstractId, abstractIds: r.abstractIds, groupKey: r.txGroupKey ?? null,
         date: r.recordingDate, txKey,
         grantorGroupNorm, grantorGroupName, granteeGroupNorm, granteeGroupName,
       });
@@ -206,7 +220,7 @@ export function aggregateRelationships(edges: TxEdge[]): Relationship[] {
     }
     a.count++;
     if (e.county) a.counties.add(e.county);
-    if (e.abstractId) a.abstracts.add(e.abstractId);
+    for (const n of edgeAbstracts(e)) a.abstracts.add(n);
     const t = e.date.getTime();
     if (t < a.first) a.first = t;
     if (t > a.last) a.last = t;
@@ -258,7 +272,7 @@ export function aggregateGroupRelationships(edges: TxEdge[]): Relationship[] {
       map.set(key, a);
     }
     if (e.county) a.counties.add(e.county);
-    if (e.abstractId) a.abstracts.add(e.abstractId);
+    for (const n of edgeAbstracts(e)) a.abstracts.add(n);
     const t = e.date.getTime();
     if (t < a.first) a.first = t;
     if (t > a.last) a.last = t;
@@ -844,18 +858,18 @@ export function entityNetwork(edges: TxEdge[], focusNorms: string[], displayName
   for (const e of edges) {
     const focusGrantee = focus.has(e.granteeNorm), focusGrantor = focus.has(e.grantorNorm);
     if (focusGrantee && !focusGrantor) {
-      acqTx.add(e.id);
+      acqTx.add(txIdent(e));
       const key = e.grantorGroupNorm ?? e.grantorNorm;
       const g = grantorAgg.get(key) ?? { name: e.grantorGroupName ?? e.grantor, tx: new Set<string>() };
-      g.tx.add(e.id); grantorAgg.set(key, g);
-      aliasBump(e.granteeNorm, e.grantee, "acqTx", e.id);
+      g.tx.add(txIdent(e)); grantorAgg.set(key, g);
+      aliasBump(e.granteeNorm, e.grantee, "acqTx", txIdent(e));
     }
     if (focusGrantor && !focusGrantee) {
-      dispTx.add(e.id);
+      dispTx.add(txIdent(e));
       const key = e.granteeGroupNorm ?? e.granteeNorm;
       const g = granteeAgg.get(key) ?? { name: e.granteeGroupName ?? e.grantee, tx: new Set<string>() };
-      g.tx.add(e.id); granteeAgg.set(key, g);
-      aliasBump(e.grantorNorm, e.grantor, "dispTx", e.id);
+      g.tx.add(txIdent(e)); granteeAgg.set(key, g);
+      aliasBump(e.grantorNorm, e.grantor, "dispTx", txIdent(e));
     }
   }
   const acquisitions = acqTx.size, dispositions = dispTx.size;
@@ -919,7 +933,7 @@ export function entityNetwork(edges: TxEdge[], focusNorms: string[], displayName
     if (!e.county) continue;
     const key = `${e.state}|${e.county}`;
     const c = countyTx.get(key) ?? { county: e.county, state: e.state, tx: new Set<string>() };
-    c.tx.add(e.id); countyTx.set(key, c);
+    c.tx.add(txIdent(e)); countyTx.set(key, c);
   }
   const countyTotal = [...countyTx.values()].reduce((s, c) => s + c.tx.size, 0);
   const counties = [...countyTx.values()]
@@ -937,7 +951,9 @@ export function entityNetwork(edges: TxEdge[], focusNorms: string[], displayName
       date: latest.date.toISOString(),
       kind: sold ? "sold" : "acquired",
       counterparty: sold ? (latest.granteeGroupName ?? latest.grantee) : (latest.grantorGroupName ?? latest.grantor),
-      tracts: new Set(sameDay.map((e) => e.id)).size,
+      // Tracts = the abstracts recorded that day (a record over three abstracts
+      // is three tracts); records naming none count one each.
+      tracts: new Set(sameDay.flatMap((e) => { const a = edgeAbstracts(e); return a.length ? a.map((n) => `${e.state}|${e.county}|${n}`) : [`doc:${e.id}`]; })).size,
     };
   }
 
@@ -945,15 +961,19 @@ export function entityNetwork(edges: TxEdge[], focusNorms: string[], displayName
   // abstract. Only round trips count; an abstract still held contributes
   // nothing (we can't know its exit yet).
   const boughtAt = new Map<string, Date>(), soldAt = new Map<string, Date>();
+  // Each abstract a record names on its own (county-qualified), so a buy of
+  // "15; 47" and a later sale of "15" pair up.
   for (const e of own) {
-    if (!e.abstractId) continue;
-    if (focus.has(e.granteeNorm) && !focus.has(e.grantorNorm)) {
-      const prev = boughtAt.get(e.abstractId);
-      if (!prev || e.date < prev) boughtAt.set(e.abstractId, e.date); // first acquisition
-    }
-    if (focus.has(e.grantorNorm) && !focus.has(e.granteeNorm)) {
-      const prev = soldAt.get(e.abstractId);
-      if (!prev || e.date > prev) soldAt.set(e.abstractId, e.date); // last disposition
+    for (const n of edgeAbstracts(e)) {
+      const k = `${e.state}|${e.county}|${n}`;
+      if (focus.has(e.granteeNorm) && !focus.has(e.grantorNorm)) {
+        const prev = boughtAt.get(k);
+        if (!prev || e.date < prev) boughtAt.set(k, e.date); // first acquisition
+      }
+      if (focus.has(e.grantorNorm) && !focus.has(e.granteeNorm)) {
+        const prev = soldAt.get(k);
+        if (!prev || e.date > prev) soldAt.set(k, e.date); // last disposition
+      }
     }
   }
   const MONTH_MS = 30.44 * 24 * 3600 * 1000;

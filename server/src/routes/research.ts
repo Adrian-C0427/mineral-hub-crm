@@ -27,6 +27,7 @@ import {
 import { normalizeCompany } from "../serializers.js";
 import { abstractSortKey, formatAbstract } from "../domain/abstractLabel.js";
 import { abstractNumbers, splitSurveys, SURVEY_SEP } from "../domain/researchGeo.js";
+import { DOC_FLAGS } from "../domain/researchFields.js";
 import { allTimeSpan, isAllPeriod } from "../domain/period.js";
 import { permitApi8, resolvePermitLocations, type WellLocation } from "../domain/permitLocations.js";
 
@@ -154,6 +155,13 @@ export interface ResearchFilters {
   /** Conveyed-interest range, percent (0–100) — documents only. */
   interestMin?: number;
   interestMax?: number;
+  /** Percent sold range (0–100) — documents only. */
+  percentSoldMin?: number;
+  percentSoldMax?: number;
+  /** Records carrying any of these flags (researchFields.DOC_FLAGS). */
+  flags: string[];
+  /** "acquisitions": only records that count as a buyer's acquisition; "other": only those that don't. */
+  acquisition?: "acquisitions" | "other";
 }
 
 /** "?interestMin=25" → 25; anything outside 0–100 or unparseable is ignored. */
@@ -195,6 +203,10 @@ export function parseFilters(q: Record<string, unknown>): ResearchFilters {
     trajectories: arr(q.trajectory),
     interestMin: pctParam(q.interestMin),
     interestMax: pctParam(q.interestMax),
+    percentSoldMin: pctParam(q.percentSoldMin),
+    percentSoldMax: pctParam(q.percentSoldMax),
+    flags: arr(q.flag).filter((v) => (DOC_FLAGS as readonly string[]).includes(v)),
+    acquisition: q.acquisition === "acquisitions" || q.acquisition === "other" ? q.acquisition : undefined,
   };
 }
 
@@ -231,7 +243,8 @@ export function parseCompare(q: Record<string, unknown>, win: Window): Window {
 
 interface DocRow {
   recordingDate: Date; docClass: ResearchDocClass; docType: ResearchDocType;
-  state: string; county: string; abstractId: string | null; survey: string | null;
+  state: string; county: string; abstractId: string | null; abstractIds: string[]; survey: string | null;
+  countsAsAcquisition: boolean; txGroupKey: string | null;
   grantee: string | null; granteeNorm: string | null; grantor: string | null; grantorNorm: string | null;
   granteeParties: string[]; granteeNorms: string[]; grantorParties: string[]; grantorNorms: string[];
   acreage: number | null;
@@ -279,8 +292,15 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.interestMin != null || f.interestMax != null) {
     w.interestPct = { not: null, ...(f.interestMin != null ? { gte: f.interestMin } : {}), ...(f.interestMax != null ? { lte: f.interestMax } : {}) };
   }
+  if (f.percentSoldMin != null || f.percentSoldMax != null) {
+    w.percentSold = { not: null, ...(f.percentSoldMin != null ? { gte: f.percentSoldMin } : {}), ...(f.percentSoldMax != null ? { lte: f.percentSoldMax } : {}) };
+  }
+  if (f.flags.length) w.docFlags = { hasSome: f.flags };
+  if (f.acquisition) w.countsAsAcquisition = f.acquisition === "acquisitions";
   const and: Prisma.ResearchDocumentWhereInput[] = [];
-  if (f.surveys.length) and.push({ OR: surveyMatch(f.surveys) });
+  // Surveys: the per-survey list (GIN-indexed), or the joined field on rows
+  // the derived-fields backfill hasn't reached yet.
+  if (f.surveys.length) and.push({ OR: [{ surveys: { hasSome: f.surveys } }, ...surveyMatch(f.surveys)] });
   if (f.buyers.length) and.push({ OR: [{ granteeNorm: { in: f.buyers } }, { granteeNorms: { hasSome: f.buyers } }] });
   if (f.sellers.length) and.push({ OR: [{ grantorNorm: { in: f.sellers } }, { grantorNorms: { hasSome: f.sellers } }] });
   if (hasAbstractFilter(f)) {
@@ -368,7 +388,8 @@ async function loadDocs(org: string, f: ResearchFilters, win: Window): Promise<D
       where: docWhere(org, f, win),
       select: {
         recordingDate: true, docClass: true, docType: true, state: true, county: true,
-        abstractId: true, survey: true, grantee: true, granteeNorm: true, grantor: true,
+        abstractId: true, abstractIds: true, survey: true, countsAsAcquisition: true, txGroupKey: true,
+        grantee: true, granteeNorm: true, grantor: true,
         grantorNorm: true, granteeParties: true, granteeNorms: true, grantorParties: true, grantorNorms: true,
         acreage: true,
       },
@@ -671,10 +692,13 @@ researchRouter.get(
 
 type GeoLevel = "state" | "county" | "abstract";
 
-function geoKeyOf(level: GeoLevel, row: { state: string; county: string; abstractId: string | null }): string | null {
-  if (level === "state") return row.state;
-  if (level === "county") return `${row.state}|${row.county}`;
-  return row.abstractId ? `${row.state}|${row.county}|${row.abstractId}` : null;
+/** The geography buckets a row falls in: one per abstract NUMBER at the
+ *  abstract level (a record over "15; 47" counts in 15 and in 47). */
+function geoKeysOf(level: GeoLevel, row: { state: string; county: string; abstractId: string | null; abstractIds?: string[] }): { key: string; abstractId: string | null }[] {
+  if (level === "state") return [{ key: row.state, abstractId: null }];
+  if (level === "county") return [{ key: `${row.state}|${row.county}`, abstractId: null }];
+  const nums = row.abstractIds?.length ? row.abstractIds : abstractNumbers(row.abstractId);
+  return nums.map((n) => ({ key: `${row.state}|${row.county}|${n}`, abstractId: n }));
 }
 
 researchRouter.get(
@@ -700,26 +724,26 @@ researchRouter.get(
       prevTotal: number; history: number[];
     }
     const map = new Map<string, GeoAgg>();
-    const get = (key: string, row: { state: string; county: string; abstractId: string | null }): GeoAgg => {
+    const get = (key: string, row: { state: string; county: string }, abstractId: string | null): GeoAgg => {
       let a = map.get(key);
       if (!a) {
         a = {
           state: row.state,
           county: level === "state" ? null : row.county,
-          abstractId: level === "abstract" ? row.abstractId : null,
+          abstractId: level === "abstract" ? abstractId : null,
           transactions: 0, leases: 0, permits: 0, prevTotal: 0, history: hist.map(() => 0),
         };
         map.set(key, a);
       }
       return a;
     };
-    const bump = (row: { state: string; county: string; abstractId: string | null }, date: Date, kind: "transactions" | "leases" | "permits") => {
-      const key = geoKeyOf(level, row);
-      if (!key) return;
-      const a = get(key, row);
-      if (within(date, win)) a[kind]++;
-      if (cmp && within(date, cmp)) a.prevTotal++;
-      hist.forEach((h, i) => { if (within(date, h)) a.history[i]++; });
+    const bump = (row: { state: string; county: string; abstractId: string | null; abstractIds?: string[] }, date: Date, kind: "transactions" | "leases" | "permits") => {
+      for (const { key, abstractId } of geoKeysOf(level, row)) {
+        const a = get(key, row, abstractId);
+        if (within(date, win)) a[kind]++;
+        if (cmp && within(date, cmp)) a.prevTotal++;
+        hist.forEach((h, i) => { if (within(date, h)) a.history[i]++; });
+      }
     };
     for (const d of docs) bump(d, d.recordingDate, d.docClass === "TRANSACTION" ? "transactions" : "leases");
     for (const p of permits) bump(p, p.activityDate, "permits");
@@ -794,11 +818,18 @@ researchRouter.get(
       const docs = await loadDocs(org, { ...f, docClass: f.docClass ?? "TRANSACTION" }, span);
       // Each PARTICIPANT of a multi-party cell ranks on its own: "A; B" buying
       // together is one acquisition for A and one for B, never a buyer "A; B".
+      // Re-recordings and non-purchases (corrections, gifts, rows a county
+      // master list leaves out) don't rank; a same-day closing group counts once.
+      const counted = new Set<string>();
       for (const d of docs) {
+        if (d.docClass === "TRANSACTION" && !d.countsAsAcquisition) continue;
         const parties = role === "buyers"
           ? sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms)
           : sideParties(d.grantor, d.grantorNorm, d.grantorParties, d.grantorNorms);
-        for (const p of parties) bump(p.norm, p.name, d.recordingDate, d.county, d.acreage);
+        for (const p of parties) {
+          if (d.txGroupKey) { const k = `${d.txGroupKey}|${p.norm}`; if (counted.has(k)) continue; counted.add(k); }
+          bump(p.norm, p.name, d.recordingDate, d.county, d.acreage);
+        }
       }
     }
 
@@ -840,11 +871,13 @@ async function loadTxEdges(org: string, f: ResearchFilters, win: Window): Promis
       docClass: f.docClass ?? "TRANSACTION",
       grantorNorm: { not: null },
       granteeNorm: { not: null },
+      // Re-recordings and non-purchases (corrections, gifts, …) never form a link.
+      countsAsAcquisition: true,
     },
     select: {
       id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
       grantorParties: true, granteeParties: true, grantorNorms: true, granteeNorms: true,
-      state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
+      state: true, county: true, abstractId: true, abstractIds: true, recordingDate: true, instrumentNumber: true, txGroupKey: true,
     },
   });
   // Participant-level expansion: multi-party instruments yield one edge per
@@ -981,8 +1014,10 @@ const RESEARCH_TAG = "Research Imported";
 
 const DOC_LITE_SELECT = {
   grantee: true, granteeNorm: true, granteeParties: true, granteeNorms: true,
-  state: true, county: true, abstractId: true, docType: true, recordingDate: true,
+  state: true, county: true, abstractId: true, abstractIds: true, docType: true, recordingDate: true,
 } as const;
+/** A buyer's research history: its acquisitions only — transactions that count as one (no leases, corrections, gifts…). */
+const ACQUISITIONS = { docClass: "TRANSACTION" as const, countsAsAcquisition: true };
 
 /**
  * Load all-time research docs for the given entity keys, grouped by key. Keys
@@ -995,14 +1030,14 @@ async function docsByGrantee(org: string, keys: string[]): Promise<Map<string, R
   // Match keys as the full-cell norm OR as an individual participant of a
   // multi-party grantee group — each participant owns its transaction history.
   const docs = await prisma.researchDocument.findMany({
-    where: { organizationId: org, OR: [{ granteeNorm: { in: keys } }, { granteeNorms: { hasSome: keys } }] },
+    where: { organizationId: org, ...ACQUISITIONS, OR: [{ granteeNorm: { in: keys } }, { granteeNorms: { hasSome: keys } }] },
     select: DOC_LITE_SELECT,
   });
   const wanted = new Set(keys);
   const byKey = new Map<string, ResearchDocLite[]>();
   const attach = (key: string, name: string | null, d: (typeof docs)[number]) => {
     const list = byKey.get(key) ?? [];
-    list.push({ grantee: name, granteeNorm: key, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
+    list.push({ grantee: name, granteeNorm: key, state: d.state, county: d.county, abstractId: d.abstractId, abstractIds: d.abstractIds, docType: d.docType, recordingDate: d.recordingDate });
     byKey.set(key, list);
   };
   for (const d of docs) {
@@ -1016,15 +1051,15 @@ async function docsByGrantee(org: string, keys: string[]): Promise<Map<string, R
   const missing = keys.filter((k) => !byKey.has(k));
   if (missing.length) {
     const grantorDocs = await prisma.researchDocument.findMany({
-      where: { organizationId: org, OR: [{ grantorNorm: { in: missing } }, { grantorNorms: { hasSome: missing } }] },
-      select: { grantor: true, grantorNorm: true, grantorParties: true, grantorNorms: true, state: true, county: true, abstractId: true, docType: true, recordingDate: true },
+      where: { organizationId: org, ...ACQUISITIONS, OR: [{ grantorNorm: { in: missing } }, { grantorNorms: { hasSome: missing } }] },
+      select: { grantor: true, grantorNorm: true, grantorParties: true, grantorNorms: true, state: true, county: true, abstractId: true, abstractIds: true, docType: true, recordingDate: true },
     });
     const missingSet = new Set(missing);
     for (const d of grantorDocs) {
       for (const p of sideParties(d.grantor, d.grantorNorm, d.grantorParties, d.grantorNorms)) {
         if (!missingSet.has(p.norm)) continue;
         const list = byKey.get(p.norm) ?? [];
-        list.push({ grantee: p.name, granteeNorm: p.norm, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
+        list.push({ grantee: p.name, granteeNorm: p.norm, state: d.state, county: d.county, abstractId: d.abstractId, abstractIds: d.abstractIds, docType: d.docType, recordingDate: d.recordingDate });
         byKey.set(p.norm, list);
       }
     }
@@ -1297,12 +1332,15 @@ researchRouter.get(
     // -- Abstract concentration: transactions clustering in one abstract ----
     const absAgg = new Map<string, { state: string; county: string; abstractId: string; cur: number; prevCnt: number }>();
     for (const d of docs) {
-      if (!d.abstractId || d.docClass !== "TRANSACTION") continue;
-      const key = `${d.state}|${d.county}|${d.abstractId}`;
-      let a = absAgg.get(key);
-      if (!a) { a = { state: d.state, county: d.county, abstractId: d.abstractId, cur: 0, prevCnt: 0 }; absAgg.set(key, a); }
-      if (within(d.recordingDate, win)) a.cur++;
-      if (within(d.recordingDate, prev)) a.prevCnt++;
+      if (d.docClass !== "TRANSACTION" || !d.countsAsAcquisition) continue;
+      // Each abstract the record names on its own.
+      for (const n of d.abstractIds.length ? d.abstractIds : abstractNumbers(d.abstractId)) {
+        const key = `${d.state}|${d.county}|${n}`;
+        let a = absAgg.get(key);
+        if (!a) { a = { state: d.state, county: d.county, abstractId: n, cur: 0, prevCnt: 0 }; absAgg.set(key, a); }
+        if (within(d.recordingDate, win)) a.cur++;
+        if (within(d.recordingDate, prev)) a.prevCnt++;
+      }
     }
     for (const a of absAgg.values()) {
       if (a.cur >= 3) {
@@ -1387,6 +1425,12 @@ const DOC_SORT_COLUMNS: Record<string, { column: string; nullable?: boolean }> =
   instrumentNumber: { column: "instrumentNumber", nullable: true },
   abstractId: { column: "abstractId", nullable: true },
   survey: { column: "survey", nullable: true },
+  percentSold: { column: "percentSold", nullable: true },
+  volume: { column: "volume", nullable: true },
+  page: { column: "page", nullable: true },
+  state: { column: "state" },
+  docTypeRaw: { column: "docTypeRaw" },
+  shareBasis: { column: "shareBasis", nullable: true },
 };
 const PERMIT_SORT_COLUMNS: Record<string, { column: string; nullable?: boolean }> = {
   activityDate: { column: "activityDate" },
@@ -1509,7 +1553,7 @@ researchRouter.get(
     const county = z.string().trim().min(1, "mapCounty is required").max(100).parse(req.query.mapCounty ?? "");
 
     const docs = await prisma.researchDocument.findMany({
-      where: { ...docWhere(org, { ...f, counties: [county] }, win), abstractId: { not: null } },
+      where: { ...docWhere(org, { ...f, counties: [county] }, win), OR: [{ abstractId: { not: null } }, { abstractIds: { isEmpty: false } }] },
       select: { abstractId: true, abstractIds: true, consideration: true },
     });
     // Every abstract a record names is shaded (the record counts once for each).
@@ -1573,7 +1617,7 @@ researchRouter.get(
       where: { ...docWhere(org, f, win), granteeNorm: { not: null } },
       select: {
         grantee: true, granteeNorm: true, granteeParties: true, granteeNorms: true, docClass: true, recordingDate: true,
-        consideration: true, acreage: true,
+        consideration: true, acreage: true, countsAsAcquisition: true,
       },
     });
     interface Agg {
@@ -1582,6 +1626,7 @@ researchRouter.get(
     }
     const byNorm = new Map<string, Agg>();
     for (const d of docs) {
+      if (d.docClass === "TRANSACTION" && !d.countsAsAcquisition) continue; // not a purchase
       // One entry per individual grantee; a group buy counts for each member.
       for (const p of sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms)) {
         const a = byNorm.get(p.norm) ?? {
@@ -1648,6 +1693,8 @@ function applyDocSearch(where: Prisma.ResearchDocumentWhereInput, q?: string, in
       { county: contains(q) }, { abstractId: contains(q) },
       { survey: contains(q) }, { legalDescription: contains(q) },
       { volume: contains(q) }, { page: contains(q) },
+      // As recorded: the survey cell and a multi-value percent sold.
+      { surveyAsRecorded: contains(q) }, { percentSoldRaw: contains(q) },
     ];
   }
 }
@@ -1914,6 +1961,9 @@ const commitSchema = z.object({
   // Deeds: the user reviewed every row as a mineral transfer, so general
   // instrument types (Warranty Deed, Assignment, …) import too.
   reviewedTransfers: z.boolean().optional(),
+  // The file is the county master list: matching records update in place
+  // (archived first); existing ones it leaves out are tagged, never deleted.
+  replaceExisting: z.boolean().optional(),
 });
 
 researchRouter.post(
@@ -1921,13 +1971,14 @@ researchRouter.post(
   requirePermission("manageResearchData"),
   ingestLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { category, csv, mapping, filename, assignedState, assignedCounty, reviewedTransfers } = commitSchema.parse(req.body);
+    const { category, csv, mapping, filename, assignedState, assignedCounty, reviewedTransfers, replaceExisting } = commitSchema.parse(req.body);
+    if (replaceExisting && category === "permits") throw new HttpError(400, "Updating existing records applies to deeds and leases");
     // All ingest logic (dedup, classification, geography normalization, the
     // per-import audit trail) lives in the shared core so the headless CLI
     // importer runs it identically. The route only supplies request context.
     const summary = await ingestResearchCsv({
       prisma, organizationId: orgId(req), createdByUserId: req.user!.id,
-      category, csv, mapping, filename, assignedState, assignedCounty, reviewedTransfers,
+      category, csv, mapping, filename, assignedState, assignedCounty, reviewedTransfers, replaceExisting,
     });
     // New deed records change where buyers have bought: buyer matching rebuilds.
     invalidateBuyerMatchCaches();
@@ -1943,10 +1994,11 @@ researchRouter.post(
   requirePermission("manageResearchData"),
   ingestLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { category, csv, mapping, assignedState, assignedCounty, reviewedTransfers } = commitSchema.parse(req.body);
+    const { category, csv, mapping, assignedState, assignedCounty, reviewedTransfers, replaceExisting } = commitSchema.parse(req.body);
     const summary = await ingestResearchCsv({
       prisma, organizationId: orgId(req), createdByUserId: req.user!.id,
       category, csv, mapping, assignedState, assignedCounty, reviewedTransfers, dryRun: true, previewRows: 8,
+      replaceExisting: replaceExisting && category !== "permits",
     });
     res.json(summary);
   }),
@@ -2070,6 +2122,8 @@ researchRouter.post(
     const where = { id: { in: ids }, organizationId: org };
     const model = kind === "DOCUMENTS" ? prisma.researchDocument : prisma.researchPermit;
     const count = (await (model as typeof prisma.researchDocument).deleteMany({ where })).count;
+    // Removed deeds change where buyers have bought: buyer matching rebuilds.
+    if (kind === "DOCUMENTS" && count) invalidateBuyerMatchCaches();
     res.json({ count });
   }),
 );
