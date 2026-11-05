@@ -12,14 +12,19 @@
  * per-import audit trail (ResearchIngestRun + ResearchIngestRow) are exactly the
  * behavior the route had inline before it was extracted — do not fork it.
  */
-import type { Prisma, PrismaClient, ResearchDocClass, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { PrismaClient, ResearchDocClass, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
 import { parse } from "csv-parse/sync";
 import { HttpError } from "../middleware/errors.js";
 import { locationFields, normState, titleCounty } from "./researchGeo.js";
-import { gisSurveyLookup, surveysFor } from "../services/researchGeoFill.js";
+import { abstractsForSurveys, gisAbstractLookup, gisSurveyLookup, surveysFor } from "../services/researchGeoFill.js";
+import { splitSurveys } from "./researchGeo.js";
+import {
+  countsAsAcquisition, DERIVED_FIELDS_VERSION, documentFlags, pairTracts, parsePercentSold, shareBasis,
+  sourceRowOf, statedTotalPct, txGroupKey } from "./researchFields.js";
 import {
   classifyDocType, classifyPermitStatus, classifyReviewedDocType, classifyTrajectory,
-  documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, normField, PARTY_RULES_VERSION } from "./research.js";
+  documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, normField, normInstrument, PARTY_RULES_VERSION } from "./research.js";
 
 // Cap rows per ingest so a single file can't drive an unbounded parse/insert
 // pass (the char-level MAX_CSV_CHARS bound still applies to the raw body).
@@ -113,6 +118,15 @@ export interface IngestArgs {
    * rejected as possibly surface deals.
    */
   reviewedTransfers?: boolean;
+  /**
+   * Deeds/Leases: the file is the county's master list. A row whose county +
+   * instrument number match ONE existing record UPDATES it in place (the id,
+   * and so every buyer link, stays; the previous values are archived in
+   * archive.research_document_history). Existing transactions of the file's
+   * counties and recording dates that the file leaves out are kept and tagged
+   * "outside-master-list" (no longer counted as acquisitions). Nothing is deleted.
+   */
+  replaceExisting?: boolean;
 }
 
 export interface IngestSummary {
@@ -129,6 +143,10 @@ export interface IngestSummary {
   dryRun: boolean;
   /** The first rows as they would import (IngestArgs.previewRows). */
   preview?: { rowIndex: number; outcome: string; reason: string | null; data: Record<string, string> }[];
+  /** File columns no field is mapped to — kept on each record as source details. */
+  unmappedColumns: string[];
+  /** replaceExisting: existing transactions the file leaves out (tagged, never deleted). */
+  outsideFile?: number;
 }
 
 /**
@@ -149,12 +167,14 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
   const {
     prisma, organizationId: org, createdByUserId, category, csv, mapping,
     filename, assignedState, assignedCounty, dryRun = false, automated = false, previewRows = 0,
-    reviewedTransfers = false,
+    reviewedTransfers = false, replaceExisting = false,
   } = args;
   const { kind, source, docClass: wantClass } = resolveCategory(category);
   const fallbackState = assignedState ? normState(assignedState) : null;
   const fallbackCounty = assignedCounty ? titleCounty(assignedCounty) : null;
-  const { rows } = parseCsv(csv);
+  const { headers, rows } = parseCsv(csv);
+  const mappedHeaders = new Set(Object.values(mapping).filter(Boolean));
+  const unmappedColumns = headers.filter((h) => h && !mappedHeaders.has(h));
   const get = (row: Record<string, string>, field: string): string => {
     const header = mapping[field];
     return header ? (row[header] ?? "").trim() : "";
@@ -237,7 +257,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     };
   };
 
-  let imported = 0, updated = 0, duplicates = 0, rejected = 0;
+  let imported = 0, updated = 0, duplicates = 0, rejected = 0, outsideFile = 0;
   const skippedReasons = new Map<string, number>();
   const countReason = (reason: string) => skippedReasons.set(reason, (skippedReasons.get(reason) ?? 0) + 1);
 
@@ -297,7 +317,65 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     const REASON_EXISTING = "Duplicate of an already-imported record";
     const REASON_IN_FILE = "Duplicate row within this file";
 
+    // Master-file replacement: the existing records of the file's footprint by
+    // county + instrument number, and how often each instrument occurs in the file.
+    const instrKey = (st: string, co: string, inst: string | null) => `${st.toUpperCase()}|${co.toUpperCase()}|${normInstrument(inst)}`;
+    type Existing = Awaited<ReturnType<typeof loadExisting>>[number];
+    async function loadExisting() {
+      return scope ? prisma.researchDocument.findMany({
+        where: { organizationId: org, ...scope, ...(wantClass ? { docClass: wantClass } : {}) },
+        select: {
+          id: true, state: true, county: true, instrumentNumber: true, recordingDate: true, docTypeRaw: true, docType: true, docClass: true,
+          grantor: true, grantee: true, grantorAsRecorded: true, granteeAsRecorded: true, grantorParties: true, granteeParties: true,
+          interestPct: true, volume: true, page: true, abstractId: true, abstractIds: true, survey: true, surveys: true, surveyAsRecorded: true,
+          percentSold: true, percentSoldRaw: true, shareBasis: true, granteeStatedTotalPct: true, docFlags: true, countsAsAcquisition: true,
+          tracts: true, txGroupKey: true, sourceRow: true,
+        },
+      }) : [];
+    }
+    const existingByInstr = new Map<string, Existing[]>();
+    const fileInstrCount = new Map<string, number>();
+    const matchedIds = new Set<string>();
+    const docUpdates: { id: string; data: Prisma.ResearchDocumentUpdateInput }[] = [];
+    let existingRows: Existing[] = [];
+    if (replaceExisting) {
+      existingRows = await loadExisting();
+      for (const e of existingRows) {
+        if (!e.instrumentNumber) continue;
+        const k = instrKey(e.state, e.county, e.instrumentNumber);
+        existingByInstr.set(k, [...(existingByInstr.get(k) ?? []), e]);
+      }
+      for (let i = 0; i < rows.length; i++) {
+        const inst = get(rows[i], "instrumentNumber");
+        const g = geos[i];
+        if (!inst || !g.state || !g.county) continue;
+        const k = instrKey(g.state, g.county, inst);
+        fileInstrCount.set(k, (fileInstrCount.get(k) ?? 0) + 1);
+      }
+    }
+    // The fields a master-file row sets, and which of them differ from a record.
+    const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const dayOf = (d: Date) => d.toISOString().slice(0, 10);
+    const changedFields = (e: Existing, d: Prisma.ResearchDocumentCreateManyInput): string[] => {
+      const out: string[] = [];
+      const cmp: [string, unknown, unknown][] = [
+        ["type", e.docTypeRaw, d.docTypeRaw], ["recording date", dayOf(e.recordingDate), dayOf(d.recordingDate as Date)],
+        ["grantor", e.grantorAsRecorded ?? e.grantor, d.grantorAsRecorded ?? d.grantor],
+        ["grantee", e.granteeAsRecorded ?? e.grantee, d.granteeAsRecorded ?? d.grantee],
+        ["volume", e.volume, d.volume], ["page", e.page, d.page],
+        ["abstracts", e.abstractIds, d.abstractIds], ["survey", e.surveys.length ? e.surveys : splitSurveys(e.survey), d.surveys],
+        ["percent sold", e.percentSoldRaw, d.percentSoldRaw], ["flags", e.docFlags, d.docFlags],
+      ];
+      for (const [label, a, b] of cmp) if (!same(a, b)) out.push(label);
+      return out;
+    };
+
     const batch: Prisma.ResearchDocumentCreateManyInput[] = [];
+    // Records named only by survey: the abstract from the county survey layer
+    // when each survey has exactly one (researchGeoFill.abstractsForSurveys).
+    const abstractFills: { county: string; surveys: string[]; set: (ids: string[]) => void }[] = [];
+    // Group keys are computed once abstracts are final (after the fills).
+    const groupFor: { doc: Prisma.ResearchDocumentCreateManyInput; grantorNorm: string | null; granteeNorm: string | null }[] = [];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const docTypeRaw = get(row, "docType");
@@ -309,7 +387,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         grantor: get(row, "grantor"), grantee: get(row, "grantee"),
         instrumentNumber: get(row, "instrumentNumber"), volume: get(row, "volume"), page: get(row, "page"),
         state: get(row, "state") || fallbackState || "", county: get(row, "county") || fallbackCounty || "",
-        abstractId: get(row, "abstractId"), survey: get(row, "survey"),
+        abstractId: get(row, "abstractId"), survey: get(row, "survey"), percentSold: get(row, "percentSold"),
         ...geoView(g),
       };
       const tooLong = oversized(row, g);
@@ -340,14 +418,20 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       const volume = get(row, "volume") || null;
       const page = get(row, "page") || null;
       const abstractId = g.abstractId;
-      const key = documentDedupeKey({
-        state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType,
-        grantorNorm, granteeNorm, volume, page, abstractId, interests: interestSignature(pf.partyInterests),
-      });
-      if (existingKeys.has(key)) { record(i, "DUPLICATE", REASON_EXISTING, data); continue; }
-      if (seenInFile.has(key)) { record(i, "DUPLICATE", REASON_IN_FILE, data); continue; }
-      seenInFile.add(key);
-      record(i, "IMPORTED", null, data);
+      const percent = parsePercentSold(get(row, "percentSold"));
+      const flags = documentFlags(docTypeRaw, get(row, "grantor"));
+      const surveyCell = get(row, "survey");
+      const surveys = splitSurveys(g.survey);
+      const fields = {
+        percentSold: percent.pct, percentSoldRaw: percent.raw,
+        shareBasis: shareBasis(percent.pct, pf.partyInterests),
+        granteeStatedTotalPct: statedTotalPct(get(row, "grantee")),
+        surveys, surveyAsRecorded: surveyCell || null,
+        tracts: pairTracts(get(row, "abstractId"), surveyCell),
+        abstractSource: g.abstractIds.length ? "recorded" : null,
+        docFlags: flags, countsAsAcquisition: countsAsAcquisition(flags),
+        sourceRow: sourceRowOf(row),
+      };
       const doc: Prisma.ResearchDocumentCreateManyInput = {
         organizationId: org, state: rowState, county: rowCounty,
         docTypeRaw, docType: cls.docType, docClass: cls.docClass,
@@ -365,18 +449,117 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         abstractIds: g.abstractIds, // each abstract number independently filterable
         survey: g.survey,
         legalDescription: g.legalDescription,
+        percentSold: fields.percentSold, percentSoldRaw: fields.percentSoldRaw, shareBasis: fields.shareBasis,
+        granteeStatedTotalPct: fields.granteeStatedTotalPct,
+        surveys: fields.surveys, surveyAsRecorded: fields.surveyAsRecorded,
+        ...(fields.tracts ? { tracts: fields.tracts as unknown as Prisma.InputJsonValue } : {}),
+        abstractSource: fields.abstractSource, docFlags: fields.docFlags, countsAsAcquisition: fields.countsAsAcquisition,
+        ...(fields.sourceRow ? { sourceRow: fields.sourceRow as Prisma.InputJsonValue } : {}),
+        derivedVersion: DERIVED_FIELDS_VERSION,
         source, ingestRunId: runId,
       };
+      const later = () => {
+        wantSurvey(g, (survey) => { doc.survey = survey; doc.surveys = splitSurveys(survey); data.surveyName = survey; });
+        if (!g.abstractIds.length && rowState === "TX" && surveys.length) {
+          abstractFills.push({ county: rowCounty, surveys, set: (ids) => { doc.abstractIds = ids; doc.abstractSource = "survey-lookup"; data.abstract = ids.join(", "); } });
+        }
+        groupFor.push({ doc, grantorNorm, granteeNorm });
+      };
+
+      // Master-file replacement: the one existing record with this county +
+      // instrument number is updated in place.
+      if (replaceExisting && instrumentNumber) {
+        const k = instrKey(rowState, rowCounty, instrumentNumber);
+        if ((fileInstrCount.get(k) ?? 0) > 1) {
+          record(i, "REJECTED", "Instrument appears more than once in this file — updating records needs one row per instrument", data);
+          continue;
+        }
+        const found = existingByInstr.get(k) ?? [];
+        if (found.length > 1) { record(i, "REJECTED", `${found.length} existing records share this instrument number — update them individually`, data); continue; }
+        if (found.length === 1) {
+          const e = found[0];
+          matchedIds.add(e.id);
+          later();
+          const diff = changedFields(e, doc);
+          const sourceChanged = !same(e.sourceRow, doc.sourceRow);
+          if (!diff.length && !sourceChanged) { record(i, "DUPLICATE", "Unchanged — the record already matches this row", data); continue; }
+          record(i, "UPDATED", `changes ${diff.length ? diff.join(", ") : "source details only"}`, data);
+          docUpdates.push({ id: e.id, data: doc as unknown as Prisma.ResearchDocumentUpdateInput });
+          continue;
+        }
+      }
+
+      const key = documentDedupeKey({
+        state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType,
+        grantorNorm, granteeNorm, volume, page, abstractId, interests: interestSignature(pf.partyInterests),
+      });
+      if (existingKeys.has(key)) { record(i, "DUPLICATE", REASON_EXISTING, data); continue; }
+      if (seenInFile.has(key)) { record(i, "DUPLICATE", REASON_IN_FILE, data); continue; }
+      seenInFile.add(key);
+      record(i, "IMPORTED", null, data);
       batch.push(doc);
-      wantSurvey(g, (survey) => { doc.survey = survey; data.surveyName = survey; });
+      later();
     }
     await fillSurveys();
+    if (abstractFills.length) {
+      const lookup = await gisAbstractLookup(prisma, abstractFills.map((f) => f.county));
+      for (const f of abstractFills) { const ids = abstractsForSurveys(lookup, f.county, f.surveys); if (ids.length) f.set(ids); }
+    }
+    for (const { doc, grantorNorm, granteeNorm } of groupFor) {
+      doc.txGroupKey = txGroupKey({
+        docClass: doc.docClass as string, state: doc.state, county: doc.county, recordingDate: doc.recordingDate as Date,
+        grantorNorm, granteeNorm, abstractIds: (doc.abstractIds as string[]) ?? [],
+      });
+    }
+    // Existing transactions of the file's counties and recording dates that the
+    // master file leaves out: kept, tagged, no longer counted as acquisitions.
+    const outside = replaceExisting
+      ? existingRows.filter((e) => e.docClass === "TRANSACTION" && !matchedIds.has(e.id) && !e.docFlags.includes("outside-master-list") &&
+          !(e.instrumentNumber && fileInstrCount.has(instrKey(e.state, e.county, e.instrumentNumber))))
+      : [];
+    outsideFile = outside.length;
     if (dryRun) {
       imported = batch.length;
     } else {
       for (let i = 0; i < batch.length; i += CHUNK) {
         const r = await prisma.researchDocument.createMany({ data: batch.slice(i, i + CHUNK) });
         imported += r.count;
+      }
+      // Every record about to change is archived first, whole, with this run.
+      const archive = async (ids: string[], reason: string) => {
+        for (let i = 0; i < ids.length; i += CHUNK) {
+          await prisma.$executeRawUnsafe(
+            `INSERT INTO archive.research_document_history (document_id, organization_id, run_id, reason, row)
+             SELECT d.id, d."organizationId", $1, $2, to_jsonb(d) FROM "ResearchDocument" d WHERE d.id = ANY($3::text[]) AND d."organizationId" = $4`,
+            runId, reason, ids.slice(i, i + CHUNK), org);
+        }
+      };
+      const now = new Date();
+      await archive(docUpdates.map((u) => u.id), "master-file update");
+      for (let i = 0; i < docUpdates.length; i += 25) {
+        await Promise.all(docUpdates.slice(i, i + 25).map((u) => {
+          // The creating import, source and creation stay with the record.
+          const { organizationId: _o, ingestRunId: _r, source: _s, ...fieldsOnly } = u.data as Record<string, unknown>;
+          return prisma.researchDocument.update({
+            where: { id: u.id },
+            data: {
+              ...(fieldsOnly as Prisma.ResearchDocumentUpdateInput),
+              tracts: (fieldsOnly.tracts as Prisma.InputJsonValue | undefined) ?? Prisma.DbNull,
+              sourceRow: (fieldsOnly.sourceRow as Prisma.InputJsonValue | undefined) ?? Prisma.DbNull,
+              partyInterests: (fieldsOnly.partyInterests as Prisma.InputJsonValue | undefined) ?? Prisma.DbNull,
+              updatedAt: now, updatedByRunId: runId,
+            },
+          });
+        }));
+      }
+      if (outside.length) {
+        await archive(outside.map((e) => e.id), "outside master list");
+        for (let i = 0; i < outside.length; i += 25) {
+          await Promise.all(outside.slice(i, i + 25).map((e) => prisma.researchDocument.update({
+            where: { id: e.id },
+            data: { docFlags: [...e.docFlags, "outside-master-list"], countsAsAcquisition: false, updatedAt: now, updatedByRunId: runId },
+          })));
+        }
       }
     }
     // Diagnostics: make a surprising duplicate count explainable in the server
@@ -550,6 +733,8 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     skipped: duplicates, failed: rejected,
     skippedReasons: [...skippedReasons.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count).slice(0, 10),
     dryRun,
+    unmappedColumns,
+    ...(replaceExisting ? { outsideFile } : {}),
     ...(previewRows > 0 ? { preview: review.slice(0, previewRows).map((r) => ({ rowIndex: r.rowIndex, outcome: r.outcome, reason: r.reason ?? null, data: r.data as Record<string, string> })) } : {}),
   };
 }

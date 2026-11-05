@@ -134,32 +134,44 @@ async function buildAcquisitionIndex(db: Db, orgIds: string[]): Promise<Acquisit
   const byNorm = new Map<string, Acquisition[]>();
   const abstractIdsByState = new Map<string, Set<string>>();
   const coveredCounties = new Set<string>();
-  const seenTx = new Set<string>();
+  // One acquisition per buyer per instrument: an instrument the county index
+  // repeats over several rows (one per grantee or tract) adds each row's
+  // grantees and abstracts to it, instead of keeping only the first row.
+  const byInstrumentAndBuyer = new Map<string, Acquisition>();
   const BATCH = 2000;
   let cursor: string | undefined;
   for (;;) {
     const rows = await db.researchDocument.findMany({
-      where: { organizationId: { in: orgIds }, docClass: "TRANSACTION" },
+      // Corrections, certified copies, amendments, gifts, stipulations and rows
+      // a county master file leaves out are records, not acquisitions.
+      where: { organizationId: { in: orgIds }, docClass: "TRANSACTION", countsAsAcquisition: true },
       select: {
         id: true, state: true, county: true, abstractIds: true, recordingDate: true, docType: true, interestPct: true, acreage: true, instrumentNumber: true,
-        grantee: true, granteeNorm: true, granteeParties: true, granteeNorms: true,
+        txGroupKey: true, grantee: true, granteeNorm: true, granteeParties: true, granteeNorms: true,
       },
       orderBy: { id: "asc" }, take: BATCH, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
     for (const d of rows) {
       const ck = countyKey(d.state, d.county);
       coveredCounties.add(ck);
-      // The same instrument imported twice (two files, two ids) is one acquisition.
       const txKey = d.instrumentNumber ? `${ck}|${d.instrumentNumber.trim().toUpperCase()}` : null;
-      if (txKey) { if (seenTx.has(txKey)) continue; seenTx.add(txKey); }
       const st = (d.state || "TX").toUpperCase();
       const ids = st === "TX" ? d.abstractIds.map((a) => gisAbstractId(fips.get(ck), a)).filter((v): v is string => !!v) : [];
       for (const id of ids) (abstractIdsByState.get(st) ?? abstractIdsByState.set(st, new Set()).get(st)!).add(id);
-      const acq: Acquisition = { docId: d.id, date: d.recordingDate, state: st, county: d.county, abstractIds: ids, docType: d.docType, interestPct: d.interestPct, acreage: d.acreage };
       const seenNorm = new Set<string>();
       for (const p of sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms)) {
         if (seenNorm.has(p.norm)) continue;
         seenNorm.add(p.norm);
+        const prior = txKey ? byInstrumentAndBuyer.get(`${txKey}|${p.norm}`) : undefined;
+        if (prior) {
+          for (const id of ids) if (!prior.abstractIds.includes(id)) prior.abstractIds.push(id);
+          continue;
+        }
+        const acq: Acquisition = {
+          docId: d.id, date: d.recordingDate, state: st, county: d.county, abstractIds: [...ids], docType: d.docType,
+          interestPct: d.interestPct, acreage: d.acreage, txKey, groupKey: d.txGroupKey,
+        };
+        if (txKey) byInstrumentAndBuyer.set(`${txKey}|${p.norm}`, acq);
         (byNorm.get(p.norm) ?? byNorm.set(p.norm, []).get(p.norm)!).push(acq);
       }
     }
@@ -179,13 +191,19 @@ export function acquisitionIndex(orgIds: string[], db: Db = prisma, now = Date.n
   return index;
 }
 
-/** This buyer's acquisitions across all its names, each record once. */
+/**
+ * This buyer's acquisitions across all its names, each counted once: the same
+ * record, the same instrument (county + number) and the same same-day closing
+ * group (instruments recorded together over the same abstracts) are one.
+ * Every acquisition weighs the same whatever share it bought (owner's rule).
+ */
 export function acquisitionsFor(index: AcquisitionIndex, keys: readonly string[]): Acquisition[] {
   const seen = new Set<string>();
   const out: Acquisition[] = [];
   for (const k of keys) for (const a of index.byNorm.get(k) ?? []) {
-    if (seen.has(a.docId)) continue;
-    seen.add(a.docId);
+    const ids = [`doc:${a.docId}`, ...(a.txKey ? [`tx:${a.txKey}`] : []), ...(a.groupKey ? [`grp:${a.groupKey}`] : [])];
+    if (ids.some((id) => seen.has(id))) continue;
+    for (const id of ids) seen.add(id);
     out.push(a);
   }
   return out;

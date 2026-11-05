@@ -26,6 +26,9 @@ interface CommitResp {
   runId: string; rowsTotal: number;
   imported: number; updated: number; duplicates: number; rejected: number;
   skippedReasons: { reason: string; count: number }[];
+  /** Update mode: existing transactions the file leaves out (tagged, never deleted). */
+  outsideFile?: number;
+  unmappedColumns?: string[];
 }
 interface IngestRun {
   id: string; kind: string; source: string; state: string | null; county: string | null; filename: string | null;
@@ -35,17 +38,18 @@ type RowOutcome = "IMPORTED" | "DUPLICATE" | "UPDATED" | "REJECTED";
 interface ReviewRow { rowIndex: number; outcome: RowOutcome; reason: string | null; data: Record<string, string> }
 interface ReviewResp { kind: "DOCUMENTS" | "PERMITS"; rows: ReviewRow[] }
 /** A dry run of the mapped file: totals for every row + the first rows as stored. */
-interface PreviewResp { rowsTotal: number; imported: number; updated: number; duplicates: number; rejected: number; preview?: ReviewRow[] }
+interface PreviewResp { rowsTotal: number; imported: number; updated: number; duplicates: number; rejected: number; preview?: ReviewRow[]; outsideFile?: number; unmappedColumns?: string[] }
 
 // Templates match the canonical columns for each Data Type.
 // Location is three columns — Abstract, Survey Name, County — plus the State.
+// Several abstracts / surveys go in one cell, ";"-separated and in the same order.
 const DEED_TEMPLATE = {
-  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "Abstract", "Survey Name", "County", "State"],
-  rows: [["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC", "2026-00412", "923", "J. Warnick Survey", "Leon", "TX"]],
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "Volume", "Page", "Abstract", "Survey Name", "County", "State", "Percent Sold"],
+  rows: [["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC (60%); Cedar Royalty LP (40%)", "2026-00412", "2041", "46", "923; 311", "J WARNICK; T RAGSDALE", "Leon", "TX", "50%"]],
 };
 const LEASE_TEMPLATE = {
-  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "Abstract", "Survey Name", "County", "State"],
-  rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "311", "T. Ragsdale Survey", "Leon", "TX"]],
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "Volume", "Page", "Abstract", "Survey Name", "County", "State"],
+  rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "2041", "52", "311", "T. Ragsdale Survey", "Leon", "TX"]],
 };
 const PERMIT_TEMPLATE = {
   headers: ["Operator Name", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date", "Abstract", "Survey Name", "County", "State"],
@@ -75,6 +79,8 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [assignCounty, setAssignCounty] = useState("");
   // Deeds: every row was reviewed as a mineral transfer — general deed types import too.
   const [reviewed, setReviewed] = useState(false);
+  // The file is the county master list: matching records update in place.
+  const [replace, setReplace] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<CommitResp | null>(null);
@@ -92,7 +98,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
 
   function reset() {
     setCsv(null); setFilename(""); setAnalysis(null); setMapping({}); setResult(null); setError("");
-    setAssignState(""); setAssignCounty(""); setReviewed(false);
+    setAssignState(""); setAssignCounty(""); setReviewed(false); setReplace(false);
   }
 
   async function onFile(f: File) {
@@ -121,6 +127,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         assignedState: assignState.trim() || undefined,
         assignedCounty: assignCounty.trim() || undefined,
         reviewedTransfers: (category === "deeds" && reviewed) || undefined,
+        replaceExisting: (category !== "permits" && replace) || undefined,
       });
       setResult(r);
       setAnalysis(null);
@@ -154,13 +161,16 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         assignedState: assignState.trim() || undefined,
         assignedCounty: assignCounty.trim() || undefined,
         reviewedTransfers: (category === "deeds" && reviewed) || undefined,
+        replaceExisting: (category !== "permits" && replace) || undefined,
       })
         .then((p) => { if (seq === previewSeq.current) setPreview(p); })
         .catch((e) => { if (seq === previewSeq.current) { setPreview(null); setPreviewErr(e instanceof Error ? e.message : "Could not preview this file"); } });
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysis, csv, category, mappingKey, assignState, assignCounty, reviewed, requiredMissing.length]);
+  }, [analysis, csv, category, mappingKey, assignState, assignCounty, reviewed, replace, requiredMissing.length]);
+  // File columns no field is mapped to: kept on every record as source details.
+  const unmapped = analysis ? analysis.headers.filter((h) => h && !Object.values(mapping).includes(h)) : [];
   const allRunsSelected = runs.length > 0 && runs.every((r) => selectedRuns.has(r.id));
   const someRunsSelected = selectedRuns.size > 0 && !allRunsSelected;
 
@@ -216,6 +226,11 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               location column, map it to each of them: every field takes only its own part, where the text names it outright
               ("A-923", "J. Warnick Survey", "Leon County"). Anything not named stays blank.
             </p>
+            {unmapped.length > 0 && (
+              <p className="rs-mapping-note">
+                Not mapped to a field: <b>{unmapped.join(", ")}</b>. These columns are still kept with each record, as recorded, under Source details.
+              </p>
+            )}
             {requiredMissing.length > 0 && (
               <Banner kind="warn">Required: {requiredMissing.map((f) => f.label).join(", ")}</Banner>
             )}
@@ -254,6 +269,18 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               </label>
             )}
 
+            {category !== "permits" && (
+              <label className="rs-reviewed">
+                <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+                <span>
+                  This file is the county's master list — update existing records
+                  <small>A row whose county and instrument number match one existing record updates that record in place: its id and
+                    buyer links stay, and the previous values are archived. Existing {category === "deeds" ? "transactions" : "leases"} of these counties and
+                    recording dates that the file leaves out are kept and tagged "Outside the master list" — nothing is deleted.</small>
+                </span>
+              </label>
+            )}
+
             {previewErr && <Banner kind="error">{previewErr}</Banner>}
             {preview?.preview && <ImportPreview kind={category === "permits" ? "PERMITS" : "DOCUMENTS"} p={preview} />}
 
@@ -261,7 +288,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               <button type="button" className="primary"
                 disabled={busy || requiredMissing.length > 0 || (!mapping.state && !assignState.trim()) || (!mapping.county && !assignCounty.trim())}
                 onClick={onCommit}>
-                Import {analysis.rowCount.toLocaleString()} rows as {CATEGORY_LABEL[category]}
+                {replace ? "Update and import" : "Import"} {analysis.rowCount.toLocaleString()} rows as {CATEGORY_LABEL[category]}
               </button>
             </div>
           </div>
@@ -279,6 +306,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               {result.updated > 0 && <div className="iss iss-upd"><span className="iss-num">{result.updated.toLocaleString()}</span><span className="iss-lbl">Updated</span></div>}
               {result.duplicates > 0 && <div className="iss iss-warn"><span className="iss-num">{result.duplicates.toLocaleString()}</span><span className="iss-lbl">Duplicates skipped</span></div>}
               {result.rejected > 0 && <div className="iss iss-bad"><span className="iss-num">{result.rejected.toLocaleString()}</span><span className="iss-lbl">Rejected</span></div>}
+              {(result.outsideFile ?? 0) > 0 && <div className="iss iss-warn"><span className="iss-num">{result.outsideFile!.toLocaleString()}</span><span className="iss-lbl">Not in file (tagged)</span></div>}
             </div>
             {result.skippedReasons.length > 0 && (
               <div className="import-summary-reasons">
@@ -386,7 +414,7 @@ const GEO_COLS: ReviewCol[] = [
 ];
 const DOC_COLS: ReviewCol[] = [
   ["docType", "Doc Type"], ["recordingDate", "Recorded"], ["grantor", "Grantor"], ["grantee", "Grantee"],
-  ["instrumentNumber", "Instrument #"], ["volume", "Vol"], ["page", "Pg"], ...GEO_COLS,
+  ["instrumentNumber", "Instrument #"], ["volume", "Vol"], ["page", "Pg"], ["percentSold", "% sold"], ...GEO_COLS,
 ];
 const PERMIT_COLS: ReviewCol[] = [
   ["operator", "Operator"], ["apiNumber", "API"], ["permitNumber", "Permit"], ["leaseName", "Lease"], ["wellName", "Well"],
@@ -394,13 +422,14 @@ const PERMIT_COLS: ReviewCol[] = [
 ];
 const cellOf = ([k, , get]: ReviewCol, d: Record<string, string>): string => (get ? get(d) : d[k] ?? "");
 
-const OUTCOME_LABEL: Record<RowOutcome, string> = { IMPORTED: "Will import", UPDATED: "Will update", DUPLICATE: "Duplicate", REJECTED: "Skipped" };
+const OUTCOME_LABEL: Record<RowOutcome, string> = { IMPORTED: "Will import", UPDATED: "Will update", DUPLICATE: "No change", REJECTED: "Skipped" };
 
 /** The import preview: whole-file totals and the first rows as they will be stored. */
 function ImportPreview({ kind, p }: { kind: "DOCUMENTS" | "PERMITS"; p: PreviewResp }) {
   const lead: ReviewCol[] = kind === "PERMITS"
     ? [["operator", "Operator"], ["apiNumber", "API"], ["leaseName", "Lease"]]
-    : [["docType", "Doc Type"], ["recordingDate", "Recorded"], ["grantor", "Grantor"], ["grantee", "Grantee"]];
+    : [["docType", "Doc Type"], ["recordingDate", "Recorded"], ["grantor", "Grantor"], ["grantee", "Grantee"],
+      ["instrumentNumber", "Instrument #"], ["volume", "Vol"], ["page", "Pg"], ["percentSold", "% sold"]];
   const cols = [...lead, ...GEO_COLS];
   const rows = p.preview ?? [];
   return (
@@ -409,7 +438,8 @@ function ImportPreview({ kind, p }: { kind: "DOCUMENTS" | "PERMITS"; p: PreviewR
         Preview <span>
           ({p.imported.toLocaleString()} will import{p.updated ? ` · ${p.updated.toLocaleString()} will update` : ""}
           {p.duplicates ? ` · ${p.duplicates.toLocaleString()} duplicate${p.duplicates === 1 ? "" : "s"}` : ""}
-          {p.rejected ? ` · ${p.rejected.toLocaleString()} skipped` : ""} — first {rows.length} row{rows.length === 1 ? "" : "s"} as stored)
+          {p.rejected ? ` · ${p.rejected.toLocaleString()} skipped` : ""}
+          {p.outsideFile ? ` · ${p.outsideFile.toLocaleString()} existing not in file, will be tagged` : ""} — first {rows.length} row{rows.length === 1 ? "" : "s"} as stored)
         </span>
       </div>
       <div className="table-scroll rs-review-scroll">

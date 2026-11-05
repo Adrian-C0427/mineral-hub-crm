@@ -24,7 +24,9 @@ describe("classifyReviewedDocType", () => {
     expect(kind("QUIT CLAIM DEED")).toBe("QUITCLAIM_MINERAL_DEED/TRANSACTION");
     for (const t of ["DEED", "GIFT DEED", "SHERIFF'S DEED"]) expect(kind(t)).toBe("MINERAL_DEED/TRANSACTION");
     for (const t of ["ASSIGNMENT", "ASSIGNMENT & BILL OF SALE", "ASGMT &BILL SALE", "DEED & ASSIGN"]) expect(kind(t)).toBe("ASSIGNMENT/TRANSACTION");
-    for (const t of ["CONVEYANCE", "CONV OF INTEREST", "CONV PROD PAYMNT"]) expect(kind(t)).toBe("MINERAL_CONVEYANCE/TRANSACTION");
+    for (const t of ["CONVEYANCE", "CONV OF INTEREST"]) expect(kind(t)).toBe("MINERAL_CONVEYANCE/TRANSACTION");
+    // A production payment is an O&G conveyance, recognised without the review switch.
+    expect(kind("CONV PROD PAYMNT")).toBe("OG_CONVEYANCE/TRANSACTION");
     for (const t of ["CORRECTION", "STIPULATION OF INTEREST"]) expect(kind(t)).toBe("OTHER/TRANSACTION");
   });
   it("leaves types the plain classifier already knows unchanged", () => {

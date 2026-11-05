@@ -26,6 +26,9 @@ export const DOCUMENT_FIELDS: ResearchField[] = [
   { key: "instrumentNumber", label: "Instrument / Document #" },
   { key: "volume", label: "Volume" },
   { key: "page", label: "Page" },
+  // The share of the grantor's own interest conveyed ("66%"), kept apart from
+  // any "(x%)" shares written in the grantee cell (domain/researchFields.ts).
+  { key: "percentSold", label: "Percent Sold" },
   // Location: three separate fields (domain/researchGeo.ts) plus the state. A
   // file with one combined location column maps it to each of them — every
   // field takes only its own part. (Legal Description stays out of the import.)
@@ -80,6 +83,7 @@ export const CSV_DOCUMENTS: ResearchSource = {
     instrumentNumber: ["docnumber", "documentnumber", "documentno", "instrumentnumber", "instrumentno", "clerkfilenumber", "clerkfileno", "filenumber", "docno"],
     volume: ["bookvolumepage", "volume", "vol", "book"],
     page: ["page", "pg"],
+    percentSold: ["percentsold", "pctsold", "percentconveyed", "pctconveyed", "interestsold", "interestconveyed", "percentinterestsold"],
     county: ["county", "countyname", "cnty", "parish"],
     state: ["state", "st", "statecode", "statename", "stateabbr", "stateabbreviation", "province"],
     abstractId: ["abstract", "abstractno", "abstractnumber", "abst"],

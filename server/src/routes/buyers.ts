@@ -241,6 +241,9 @@ buyersRouter.get(
     const rows = await prisma.researchDocument.findMany({
       where: {
         organizationId: { in: buyerNetworkOrgIds(req) }, docClass: "TRANSACTION",
+        // Corrections, certified copies, gifts, stipulations and rows a county
+        // master list leaves out are records, not acquisitions or dispositions.
+        countsAsAcquisition: true,
         AND: [
           { OR: [{ grantorNorm: { not: null } }, { grantorNorms: { isEmpty: false } }] },
           { OR: [{ granteeNorm: { not: null } }, { granteeNorms: { isEmpty: false } }] },
@@ -249,7 +252,7 @@ buyersRouter.get(
       select: {
         id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
         grantorParties: true, granteeParties: true, grantorNorms: true, granteeNorms: true,
-        state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
+        state: true, county: true, abstractId: true, abstractIds: true, recordingDate: true, instrumentNumber: true, txGroupKey: true,
       },
     });
     // Participant-level expansion: each party on a multi-party instrument is

@@ -20,7 +20,8 @@
  * Input CSV columns (recorded documents; header names are auto-mapped via the
  * app's alias table, so casing/spacing variants are fine):
  *   GRANTOR, GRANTEE, DOC TYPE, RECORDED DATE, INSTRUMENT NUMBER,
- *   VOLUME, PAGE, ABSTRACT, COUNTY, STATE
+ *   VOLUME, PAGE, ABSTRACT, COUNTY, STATE, PERCENT SOLD, SURVEY NAME
+ * (any other column is kept on each record as source details).
  * ABSTRACT may hold multiple comma-separated values inside a quoted field
  * (e.g. "22, 1045"); the CSV parser keeps it as one value, as the app stores it.
  *
@@ -34,6 +35,11 @@
  *   --state <XX>           File-level State fallback for rows lacking a State column.
  *   --county <name>        File-level County fallback for rows lacking a County column.
  *   --dry-run              Parse + validate + dedup, print the outcome, write nothing.
+ *   --reviewed             Deeds: every row was reviewed as a mineral transfer
+ *                          (general types — Warranty Deed, Assignment, Deed — import too).
+ *   --replace              The file is the county master list: matching records
+ *                          (county + instrument #) update in place, archived first;
+ *                          existing transactions it leaves out are tagged, never deleted.
  *   -h, --help             Show this help.
  *
  * Exit codes: 0 = success; 1 = one or more rows were rejected (malformed / not
@@ -56,6 +62,8 @@ interface Args {
   state: string | null;
   county: string | null;
   dryRun: boolean;
+  reviewed: boolean;
+  replace: boolean;
 }
 
 const HELP = `Import county deed records (CSV) into the Research module.
@@ -70,6 +78,9 @@ Options:
   --state <XX>        File-level State fallback (rows without a State column).
   --county <name>     File-level County fallback (rows without a County column).
   --dry-run           Validate + dedup only; write nothing.
+  --reviewed          Deeds: rows were reviewed as mineral transfers (general deed types import).
+  --replace           Master list: update matching records in place (archived first);
+                      tag existing transactions the file leaves out. Never deletes.
   -h, --help          Show this help.
 
 Exit codes: 0 ok · 1 some rows rejected · 2 could not run.`;
@@ -83,6 +94,8 @@ function parseArgs(argv: string[]): Args | { help: true } {
   let state: string | null = null;
   let county: string | null = null;
   let dryRun = false;
+  let reviewed = false;
+  let replace = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -103,6 +116,8 @@ function parseArgs(argv: string[]): Args | { help: true } {
       case "--state": state = next(); break;
       case "--county": county = next(); break;
       case "--dry-run": dryRun = true; break;
+      case "--reviewed": reviewed = true; break;
+      case "--replace": replace = true; break;
       default:
         if (a.startsWith("-")) throw new UsageError(`Unknown option: ${a}`);
         if (csvPath) throw new UsageError(`Unexpected extra argument: ${a}`);
@@ -112,7 +127,8 @@ function parseArgs(argv: string[]): Args | { help: true } {
 
   if (!csvPath) throw new UsageError("A path to the CSV file is required.");
   if (!org) throw new UsageError("--org <id|name> is required.");
-  return { csvPath, org, category, state, county, dryRun };
+  if (replace && category === "permits") throw new UsageError("--replace applies to deeds and leases");
+  return { csvPath, org, category, state, county, dryRun, reviewed, replace };
 }
 
 class UsageError extends Error {}
@@ -134,7 +150,7 @@ function fmtInt(n: number): string {
 async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
   if ("help" in parsed) { console.log(HELP); return 0; }
-  const { csvPath, org: orgArg, category, state, county, dryRun } = parsed;
+  const { csvPath, org: orgArg, category, state, county, dryRun, reviewed, replace } = parsed;
 
   const absPath = path.resolve(csvPath);
   if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
@@ -171,6 +187,8 @@ async function main(): Promise<number> {
     assignedState: state,
     assignedCounty: county,
     dryRun,
+    reviewedTransfers: reviewed && category === "deeds",
+    replaceExisting: replace,
   });
 
   // unchanged = duplicates (already present / repeated in-file, nothing written).
@@ -189,7 +207,11 @@ async function main(): Promise<number> {
       console.error(`    - ${fmtInt(count)} × ${reason}`);
     }
   }
+  if (summary.outsideFile != null) console.error(`  not in file: ${fmtInt(summary.outsideFile)} existing transactions${dryRun ? " (would be tagged)" : " tagged outside the master list"}`);
+  if (summary.unmappedColumns.length) console.error(`  kept as source details: ${summary.unmappedColumns.join(", ")}`);
   if (summary.runId) console.error(`  import run: ${summary.runId}`);
+  // This process can't reach the API's in-memory caches: buyer matching picks
+  // the new records up when its index next expires (at most 10 minutes).
   console.error("");
 
   // Machine-parseable one-liner on stdout for an automation to capture.
@@ -206,6 +228,7 @@ async function main(): Promise<number> {
     unchanged,
     skipped: summary.rejected,
     skippedReasons: summary.skippedReasons,
+    ...(summary.outsideFile != null ? { outsideFile: summary.outsideFile } : {}),
   };
   console.log(JSON.stringify(out));
 
